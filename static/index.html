@@ -1,0 +1,616 @@
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>X-Neuro · Neural Evolution Simulator</title>
+  <link rel="stylesheet" href="/static/css/style.css"/>
+
+  <!-- D3.js for network graph -->
+  <script src="https://d3js.org/d3.v7.min.js"></script>
+  <!-- Chart.js for voltage traces -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+</head>
+<body>
+
+<!-- ═══════════════ HEADER ═══════════════ -->
+<header id="header">
+  <div class="header-left">
+    <span class="logo">⚡ X-NEURO</span>
+    <span class="subtitle">Neural Evolution Simulator</span>
+  </div>
+  <div class="header-center">
+    <span id="sim-time" class="stat-badge">t = 0.0 ms</span>
+    <span id="sim-status" class="stat-badge status-running">▶ A Correr</span>
+    <span id="spike-count" class="stat-badge">0 spikes</span>
+    <span id="sync-badge" class="stat-badge">sync: –</span>
+  </div>
+  <div class="header-right">
+    <button class="btn btn-primary"  id="btn-start">▶</button>
+    <button class="btn btn-warning"  id="btn-pause">⏸</button>
+    <button class="btn btn-danger"   id="btn-reset">⏹</button>
+    <button class="btn btn-glow"     id="btn-stim-all" title="Estimular todos os neurónios">⚡ Estimular</button>
+    <button class="btn btn-evolve"   id="btn-evolve" title="Correr evolução genética">🧬 Evoluir</button>
+  </div>
+</header>
+
+<!-- ═══════════════ MAIN LAYOUT ═══════════════ -->
+<main id="main">
+
+  <!-- LEFT PANEL: Parameters -->
+  <aside id="left-panel">
+    <div class="panel-tabs">
+      <button class="tab-btn active" data-tab="network">Rede</button>
+      <button class="tab-btn" data-tab="neuron">Neurónio</button>
+      <button class="tab-btn" data-tab="synapse">Sinapse</button>
+      <button class="tab-btn" data-tab="evolution">Evolução</button>
+      <button class="tab-btn" data-tab="simulation">Sim.</button>
+    </div>
+
+    <!-- NETWORK TAB -->
+    <div class="tab-content active" id="tab-network">
+      <h3>Configuração da Rede</h3>
+      <label>Topologia
+        <select id="net-topology">
+          <option value="random">Aleatória (Erdős-Rényi)</option>
+          <option value="small_world">Mundo Pequeno (Watts-Strogatz)</option>
+          <option value="scale_free">Livre de Escala (Barabási-Albert)</option>
+          <option value="layered">Camadas (Feedforward)</option>
+        </select>
+      </label>
+      <label>Nº Neurónios
+        <div class="slider-row">
+          <input type="range" id="net-n" min="4" max="80" value="18" step="1"/>
+          <span class="val" id="net-n-val">18</span>
+        </div>
+      </label>
+      <label>Prob. Ligação (p)
+        <div class="slider-row">
+          <input type="range" id="net-prob" min="0.05" max="0.80" value="0.22" step="0.01"/>
+          <span class="val" id="net-prob-val">0.22</span>
+        </div>
+      </label>
+      <label>Frac. Excitatório
+        <div class="slider-row">
+          <input type="range" id="net-exc" min="0.2" max="1.0" value="0.78" step="0.01"/>
+          <span class="val" id="net-exc-val">0.78</span>
+        </div>
+      </label>
+      <label>Dist. Máx. Axonal (mm)
+        <div class="slider-row">
+          <input type="range" id="net-dist" min="0.1" max="10.0" value="3.0" step="0.1"/>
+          <span class="val" id="net-dist-val">3.0</span>
+        </div>
+      </label>
+      <label>Modelo Padrão
+        <select id="net-model">
+          <option value="izh">Izhikevich (recomendado)</option>
+          <option value="lif">LIF (rápido)</option>
+          <option value="hh">Hodgkin-Huxley (biofísico)</option>
+        </select>
+      </label>
+
+      <!-- Small-world extra -->
+      <div id="sw-params" style="display:none">
+        <label>SW k (vizinhos)
+          <div class="slider-row">
+            <input type="range" id="sw-k" min="2" max="20" value="4" step="2"/>
+            <span class="val" id="sw-k-val">4</span>
+          </div>
+        </label>
+        <label>SW β (rewire)
+          <div class="slider-row">
+            <input type="range" id="sw-beta" min="0.0" max="1.0" value="0.3" step="0.05"/>
+            <span class="val" id="sw-beta-val">0.30</span>
+          </div>
+        </label>
+      </div>
+
+      <!-- Scale-free extra -->
+      <div id="sf-params" style="display:none">
+        <label>SF m (ligações/nó)
+          <div class="slider-row">
+            <input type="range" id="sf-m" min="1" max="10" value="2" step="1"/>
+            <span class="val" id="sf-m-val">2</span>
+          </div>
+        </label>
+      </div>
+
+      <button class="btn btn-primary full-width mt-8" id="btn-rebuild">↺ Reconstruir Rede</button>
+    </div>
+
+    <!-- NEURON TAB -->
+    <div class="tab-content" id="tab-neuron">
+      <h3>Parâmetros do Neurónio</h3>
+      <div id="neuron-select-info">
+        <p class="hint">Clique num neurónio na rede para selecionar.</p>
+        <label>Aplicar a todos do tipo
+          <select id="bulk-apply-type">
+            <option value="">-- selecionar --</option>
+            <option value="pyramidal">Piramidal</option>
+            <option value="interneuron">Interneurônio</option>
+            <option value="motor">Motor</option>
+            <option value="sensory">Sensorial</option>
+            <option value="purkinje">Purkinje</option>
+            <option value="granule">Granular</option>
+          </select>
+        </label>
+      </div>
+
+      <div id="neuron-params-panel">
+        <div class="param-group">
+          <h4>Tipo &amp; Modelo</h4>
+          <label>Tipo
+            <select id="nrn-type">
+              <option value="pyramidal">Piramidal (excitatório)</option>
+              <option value="interneuron">Interneurônio (inibitório)</option>
+              <option value="motor">Motor</option>
+              <option value="sensory">Sensorial</option>
+              <option value="purkinje">Purkinje</option>
+              <option value="granule">Granular</option>
+              <option value="custom">Custom</option>
+            </select>
+          </label>
+          <label>Modelo
+            <select id="nrn-model">
+              <option value="izh">Izhikevich</option>
+              <option value="lif">LIF</option>
+              <option value="hh">Hodgkin-Huxley</option>
+            </select>
+          </label>
+        </div>
+
+        <div class="param-group">
+          <h4>Potenciais de Membrana (mV)</h4>
+          <label>V repouso
+            <div class="slider-row">
+              <input type="range" id="nrn-vrest" min="-90" max="-50" value="-70" step="0.5"/>
+              <span class="val" id="nrn-vrest-val">-70.0</span>
+            </div>
+          </label>
+          <label>V limiar
+            <div class="slider-row">
+              <input type="range" id="nrn-vthresh" min="-70" max="-40" value="-55" step="0.5"/>
+              <span class="val" id="nrn-vthresh-val">-55.0</span>
+            </div>
+          </label>
+          <label>V pico (PA)
+            <div class="slider-row">
+              <input type="range" id="nrn-vpeak" min="10" max="60" value="30" step="1"/>
+              <span class="val" id="nrn-vpeak-val">30.0</span>
+            </div>
+          </label>
+          <label>V reset
+            <div class="slider-row">
+              <input type="range" id="nrn-vreset" min="-85" max="-50" value="-65" step="0.5"/>
+              <span class="val" id="nrn-vreset-val">-65.0</span>
+            </div>
+          </label>
+        </div>
+
+        <div class="param-group">
+          <h4>Constantes de Tempo</h4>
+          <label>τ membrana (ms)
+            <div class="slider-row">
+              <input type="range" id="nrn-taum" min="2" max="50" value="20" step="0.5"/>
+              <span class="val" id="nrn-taum-val">20.0</span>
+            </div>
+          </label>
+          <label>τ refratário (ms)
+            <div class="slider-row">
+              <input type="range" id="nrn-tauref" min="0.5" max="10" value="2" step="0.5"/>
+              <span class="val" id="nrn-tauref-val">2.0</span>
+            </div>
+          </label>
+        </div>
+
+        <div class="param-group" id="izh-params">
+          <h4>Parâmetros Izhikevich</h4>
+          <div class="izh-presets">
+            <button class="preset-btn" data-preset="rs">RS</button>
+            <button class="preset-btn" data-preset="ib">IB</button>
+            <button class="preset-btn" data-preset="ch">CH</button>
+            <button class="preset-btn" data-preset="fs">FS</button>
+            <button class="preset-btn" data-preset="tc">TC</button>
+            <button class="preset-btn" data-preset="lts">LTS</button>
+          </div>
+          <label>a (escala de u)
+            <div class="slider-row">
+              <input type="range" id="nrn-izha" min="0.01" max="0.5" value="0.02" step="0.005"/>
+              <span class="val" id="nrn-izha-val">0.020</span>
+            </div>
+          </label>
+          <label>b (sensibilidade u)
+            <div class="slider-row">
+              <input type="range" id="nrn-izhb" min="0.1" max="0.5" value="0.2" step="0.01"/>
+              <span class="val" id="nrn-izhb-val">0.200</span>
+            </div>
+          </label>
+          <label>c (reset v, mV)
+            <div class="slider-row">
+              <input type="range" id="nrn-izhc" min="-80" max="-40" value="-65" step="0.5"/>
+              <span class="val" id="nrn-izhc-val">-65.0</span>
+            </div>
+          </label>
+          <label>d (incremento u)
+            <div class="slider-row">
+              <input type="range" id="nrn-izhd" min="0.05" max="20" value="8" step="0.05"/>
+              <span class="val" id="nrn-izhd-val">8.000</span>
+            </div>
+          </label>
+        </div>
+
+        <div class="param-group" id="hh-params" style="display:none">
+          <h4>Condutâncias HH (mS/cm²)</h4>
+          <label>g_Na máx.
+            <div class="slider-row">
+              <input type="range" id="nrn-gna" min="50" max="200" value="120" step="1"/>
+              <span class="val" id="nrn-gna-val">120.0</span>
+            </div>
+          </label>
+          <label>g_K máx.
+            <div class="slider-row">
+              <input type="range" id="nrn-gk" min="10" max="80" value="36" step="1"/>
+              <span class="val" id="nrn-gk-val">36.0</span>
+            </div>
+          </label>
+          <label>g_L (fuga)
+            <div class="slider-row">
+              <input type="range" id="nrn-gl" min="0.05" max="2" value="0.3" step="0.05"/>
+              <span class="val" id="nrn-gl-val">0.30</span>
+            </div>
+          </label>
+          <label>E_Na (mV)
+            <div class="slider-row">
+              <input type="range" id="nrn-ena" min="30" max="80" value="50" step="1"/>
+              <span class="val" id="nrn-ena-val">50.0</span>
+            </div>
+          </label>
+          <label>E_K (mV)
+            <div class="slider-row">
+              <input type="range" id="nrn-ek" min="-100" max="-60" value="-77" step="1"/>
+              <span class="val" id="nrn-ek-val">-77.0</span>
+            </div>
+          </label>
+        </div>
+
+        <div class="param-group">
+          <h4>Axônio &amp; Ruído</h4>
+          <label>Diâmetro axonal (μm)
+            <div class="slider-row">
+              <input type="range" id="nrn-axond" min="0.1" max="20" value="1" step="0.1"/>
+              <span class="val" id="nrn-axond-val">1.0</span>
+            </div>
+          </label>
+          <label>Comprimento axonal (mm)
+            <div class="slider-row">
+              <input type="range" id="nrn-axonl" min="0.1" max="100" value="1" step="0.1"/>
+              <span class="val" id="nrn-axonl-val">1.0</span>
+            </div>
+          </label>
+          <label class="checkbox-label">
+            <input type="checkbox" id="nrn-myelin"/> Mielinizado
+          </label>
+          <label>Nível de ruído (mV)
+            <div class="slider-row">
+              <input type="range" id="nrn-noise" min="0" max="5" value="0.5" step="0.1"/>
+              <span class="val" id="nrn-noise-val">0.5</span>
+            </div>
+          </label>
+          <label>Corrente externa (μA/cm²)
+            <div class="slider-row">
+              <input type="range" id="nrn-iext" min="0" max="30" value="0" step="0.5"/>
+              <span class="val" id="nrn-iext-val">0.0</span>
+            </div>
+          </label>
+        </div>
+
+        <div class="neuron-info-box" id="neuron-info-box">
+          <span id="nrn-id-label">Neurónio #–</span>
+          <span id="nrn-voltage-live">V = – mV</span>
+          <span id="nrn-fire-rate">0 Hz</span>
+        </div>
+
+        <div style="display:flex;gap:6px;margin-top:8px">
+          <button class="btn btn-primary" id="btn-apply-neuron" style="flex:1">✔ Aplicar</button>
+          <button class="btn btn-glow"    id="btn-stim-neuron"  style="flex:1">⚡ Estimular</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- SYNAPSE TAB -->
+    <div class="tab-content" id="tab-synapse">
+      <h3>Parâmetros da Sinapse</h3>
+      <p class="hint">Clique numa sinapse (linha) na rede para selecionar.</p>
+      <div id="synapse-params-panel">
+        <label>Tipo de receptor
+          <select id="syn-type">
+            <option value="ampa">AMPA (excitatório rápido, τ≈2ms)</option>
+            <option value="nmda">NMDA (excitatório lento, τ≈100ms)</option>
+            <option value="gaba_a">GABA-A (inibitório rápido, τ≈6ms)</option>
+            <option value="gaba_b">GABA-B (inibitório lento, τ≈150ms)</option>
+          </select>
+        </label>
+        <label>Peso sináptico (w)
+          <div class="slider-row">
+            <input type="range" id="syn-weight" min="0.01" max="5" value="1" step="0.01"/>
+            <span class="val" id="syn-weight-val">1.00</span>
+          </div>
+        </label>
+        <label>Distância (mm)
+          <div class="slider-row">
+            <input type="range" id="syn-dist" min="0.1" max="10" value="1" step="0.1"/>
+            <span class="val" id="syn-dist-val">1.0</span>
+          </div>
+        </label>
+        <label>τ cinética (ms)
+          <div class="slider-row">
+            <input type="range" id="syn-tau" min="0.5" max="200" value="2" step="0.5"/>
+            <span class="val" id="syn-tau-val">2.0</span>
+          </div>
+        </label>
+
+        <div class="synapse-info-box" id="synapse-info-box">
+          <span id="syn-id-label">Sinapse –→–</span>
+          <span id="syn-atten-label">Atenuação: –</span>
+          <span id="syn-delay-label">Atraso: – ms</span>
+          <span id="syn-vel-label">Vel. condução: – m/s</span>
+        </div>
+
+        <h4 style="margin-top:12px">Teoria de Cabo</h4>
+        <div class="info-card">
+          <p>V(x) = V₀ × e<sup>−x/λ</sup></p>
+          <p id="cable-lambda">λ (constante espacial) = – mm</p>
+          <p id="cable-atten">Atenuação na distância atual: –%</p>
+        </div>
+
+        <button class="btn btn-primary full-width mt-8" id="btn-apply-synapse">✔ Aplicar</button>
+      </div>
+    </div>
+
+    <!-- EVOLUTION TAB -->
+    <div class="tab-content" id="tab-evolution">
+      <h3>Evolução Genética</h3>
+      <label>Função de fitness
+        <select id="evo-fitness">
+          <option value="max_firing_rate">Maximizar taxa de disparo</option>
+          <option value="target_20hz">Alvo: 20 Hz</option>
+          <option value="target_10hz">Alvo: 10 Hz</option>
+          <option value="synchrony">Maximizar sincronía</option>
+          <option value="diversity">Maximizar diversidade</option>
+          <option value="efficiency">Eficiência (spikes/peso)</option>
+        </select>
+      </label>
+      <label>Nº Gerações
+        <div class="slider-row">
+          <input type="range" id="evo-gen" min="1" max="20" value="3" step="1"/>
+          <span class="val" id="evo-gen-val">3</span>
+        </div>
+      </label>
+      <label>Taxa de mutação
+        <div class="slider-row">
+          <input type="range" id="evo-mrate" min="0.01" max="0.5" value="0.15" step="0.01"/>
+          <span class="val" id="evo-mrate-val">0.15</span>
+        </div>
+      </label>
+      <label>Escala de mutação
+        <div class="slider-row">
+          <input type="range" id="evo-mscale" min="0.01" max="0.5" value="0.1" step="0.01"/>
+          <span class="val" id="evo-mscale-val">0.10</span>
+        </div>
+      </label>
+      <label class="checkbox-label">
+        <input type="checkbox" id="evo-structural" checked/>
+        Evolução estrutural (podar/adicionar)
+      </label>
+
+      <button class="btn btn-evolve full-width mt-8" id="btn-evolve-panel">🧬 Correr Evolução</button>
+
+      <div id="evo-history" class="evo-history"></div>
+    </div>
+
+    <!-- SIMULATION TAB -->
+    <div class="tab-content" id="tab-simulation">
+      <h3>Parâmetros da Simulação</h3>
+      <label>Passo temporal dt (ms)
+        <select id="sim-dt">
+          <option value="0.01">0.01 ms (HH, preciso)</option>
+          <option value="0.05">0.05 ms</option>
+          <option value="0.1" selected>0.1 ms (padrão)</option>
+          <option value="0.5">0.5 ms (rápido)</option>
+        </select>
+      </label>
+      <label>Velocidade (× real)
+        <div class="slider-row">
+          <input type="range" id="sim-speed" min="100" max="10000" value="2000" step="100"/>
+          <span class="val" id="sim-speed-val">2000</span>
+        </div>
+      </label>
+
+      <h4 style="margin-top:12px">STDP (Plasticidade)</h4>
+      <label class="checkbox-label">
+        <input type="checkbox" id="stdp-enabled"/>
+        Ativar STDP
+      </label>
+      <label>A⁺ (LTP)
+        <div class="slider-row">
+          <input type="range" id="stdp-aplus" min="0.001" max="0.1" value="0.01" step="0.001"/>
+          <span class="val" id="stdp-aplus-val">0.010</span>
+        </div>
+      </label>
+      <label>A⁻ (LTD)
+        <div class="slider-row">
+          <input type="range" id="stdp-aminus" min="0.001" max="0.1" value="0.012" step="0.001"/>
+          <span class="val" id="stdp-aminus-val">0.012</span>
+        </div>
+      </label>
+      <label>τ⁺ (ms)
+        <div class="slider-row">
+          <input type="range" id="stdp-tauplus" min="5" max="100" value="20" step="1"/>
+          <span class="val" id="stdp-tauplus-val">20</span>
+        </div>
+      </label>
+      <label>τ⁻ (ms)
+        <div class="slider-row">
+          <input type="range" id="stdp-tauminus" min="5" max="100" value="20" step="1"/>
+          <span class="val" id="stdp-tauminus-val">20</span>
+        </div>
+      </label>
+
+      <h4 style="margin-top:12px">Estímulo Global</h4>
+      <label>Tipo
+        <select id="stim-type">
+          <option value="pulse">Pulso</option>
+          <option value="constant">Constante</option>
+          <option value="ramp">Rampa</option>
+          <option value="sinusoidal">Sinusoidal</option>
+          <option value="random">Aleatório</option>
+        </select>
+      </label>
+      <label>Amplitude (μA/cm²)
+        <div class="slider-row">
+          <input type="range" id="stim-amp" min="0.5" max="30" value="8" step="0.5"/>
+          <span class="val" id="stim-amp-val">8.0</span>
+        </div>
+      </label>
+      <label>Duração (ms)
+        <div class="slider-row">
+          <input type="range" id="stim-dur" min="5" max="500" value="100" step="5"/>
+          <span class="val" id="stim-dur-val">100</span>
+        </div>
+      </label>
+      <label>Frequência (Hz, sinusoidal)
+        <div class="slider-row">
+          <input type="range" id="stim-freq" min="1" max="100" value="20" step="1"/>
+          <span class="val" id="stim-freq-val">20</span>
+        </div>
+      </label>
+      <button class="btn btn-primary full-width mt-8" id="btn-apply-sim">✔ Aplicar</button>
+    </div>
+  </aside>
+
+  <!-- CENTER: Network + Charts -->
+  <section id="center-panel">
+    <div id="network-container">
+      <svg id="network-svg">
+        <defs>
+          <marker id="arrow-exc" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">
+            <path d="M0,0 L0,6 L6,3 z" fill="#00ff88"/>
+          </marker>
+          <marker id="arrow-inh" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">
+            <path d="M0,0 L0,6 L6,3 z" fill="#ff4466"/>
+          </marker>
+          <marker id="arrow-active" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">
+            <path d="M0,0 L0,6 L6,3 z" fill="#ffee00"/>
+          </marker>
+          <filter id="glow">
+            <feGaussianBlur stdDeviation="3" result="coloredBlur"/>
+            <feMerge>
+              <feMergeNode in="coloredBlur"/>
+              <feMergeNode in="SourceGraphic"/>
+            </feMerge>
+          </filter>
+          <filter id="glow-strong">
+            <feGaussianBlur stdDeviation="6" result="coloredBlur"/>
+            <feMerge>
+              <feMergeNode in="coloredBlur"/>
+              <feMergeNode in="SourceGraphic"/>
+            </feMerge>
+          </filter>
+        </defs>
+        <g id="syn-layer"></g>
+        <g id="neuron-layer"></g>
+        <g id="pulse-layer"></g>
+      </svg>
+      <div id="network-tooltip" class="tooltip hidden"></div>
+      <div id="network-legend">
+        <span class="leg-item"><span class="leg-dot exc"></span> Excit.</span>
+        <span class="leg-item"><span class="leg-dot inh"></span> Inhib.</span>
+        <span class="leg-item"><span class="leg-dot fire"></span> Disparo</span>
+        <span class="leg-item"><span class="leg-line syn-exc"></span> AMPA/NMDA</span>
+        <span class="leg-item"><span class="leg-line syn-inh"></span> GABA</span>
+      </div>
+    </div>
+
+    <!-- CHARTS -->
+    <div id="charts-container">
+      <div class="chart-header">
+        <span class="chart-title">Potenciais de Membrana</span>
+        <span class="hint">(clique neurónios para monitorizar, máx. 4)</span>
+        <button class="btn btn-sm" id="btn-clear-charts">✕ Limpar</button>
+      </div>
+      <div id="charts-grid">
+        <div class="chart-slot" id="chart-slot-0">
+          <canvas id="chart-0"></canvas>
+          <div class="chart-label" id="chart-label-0">–</div>
+        </div>
+        <div class="chart-slot" id="chart-slot-1">
+          <canvas id="chart-1"></canvas>
+          <div class="chart-label" id="chart-label-1">–</div>
+        </div>
+        <div class="chart-slot" id="chart-slot-2">
+          <canvas id="chart-2"></canvas>
+          <div class="chart-label" id="chart-label-2">–</div>
+        </div>
+        <div class="chart-slot" id="chart-slot-3">
+          <canvas id="chart-3"></canvas>
+          <div class="chart-label" id="chart-label-3">–</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- RIGHT PANEL: Stats + Raster -->
+  <aside id="right-panel">
+    <h3>Estatísticas</h3>
+    <div class="stats-grid">
+      <div class="stat-card"><span class="stat-val" id="st-neurons">–</span><span class="stat-lbl">Neurónios</span></div>
+      <div class="stat-card"><span class="stat-val" id="st-synapses">–</span><span class="stat-lbl">Sinapses</span></div>
+      <div class="stat-card"><span class="stat-val" id="st-exc">–</span><span class="stat-lbl">Excitatórios</span></div>
+      <div class="stat-card"><span class="stat-val" id="st-inh">–</span><span class="stat-lbl">Inibitórios</span></div>
+      <div class="stat-card"><span class="stat-val" id="st-meanv">–</span><span class="stat-lbl">V médio (mV)</span></div>
+      <div class="stat-card"><span class="stat-val" id="st-spikes">–</span><span class="stat-lbl">Total Spikes</span></div>
+    </div>
+
+    <h3 style="margin-top:12px">Taxas de Disparo</h3>
+    <div id="rate-bars"></div>
+
+    <h3 style="margin-top:12px">Raster Plot</h3>
+    <canvas id="raster-canvas" width="220" height="140"></canvas>
+
+    <h3 style="margin-top:12px">Legenda de Cores</h3>
+    <div class="voltage-scale">
+      <div class="vs-bar"></div>
+      <div class="vs-labels">
+        <span>+40 mV (PA)</span>
+        <span>−55 mV (limiar)</span>
+        <span>−70 mV (repouso)</span>
+        <span>−90 mV (hiperpol.)</span>
+      </div>
+    </div>
+
+    <h3 style="margin-top:12px">Velocidade de Condução</h3>
+    <div class="info-card small" id="conduction-info">
+      <p>Mielinizado: 6×d m/s</p>
+      <p>Não mielinizado: 0.57×√d m/s</p>
+      <p id="sel-neuron-vel">Neurónio sel.: – m/s</p>
+    </div>
+  </aside>
+
+</main>
+
+<!-- ═══ EVOLUTION OVERLAY ═══ -->
+<div id="evo-overlay" class="overlay hidden">
+  <div class="overlay-box">
+    <div class="overlay-title">🧬 A Evoluir Rede Neural…</div>
+    <div class="evo-progress-bar"><div id="evo-progress-fill"></div></div>
+    <div id="evo-status-text">Geração 0 / 0</div>
+  </div>
+</div>
+
+<script src="/static/js/app.js"      type="module"></script>
+<script src="/static/js/network-viz.js" type="module"></script>
+<script src="/static/js/charts.js"   type="module"></script>
+<script src="/static/js/controls.js" type="module"></script>
+</body>
+</html>
