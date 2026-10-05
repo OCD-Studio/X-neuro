@@ -1,0 +1,34 @@
+# Arranque: docker compose up -d   (app em http://localhost:8000)
+# O agendador corre a sincronização ao arrancar e depois todos os dias às 06:17 (Europe/Lisbon).
+# O backfill histórico completo demora alguns dias com SYNC_MAX_BACKFILL=3 (ou ~30 min com 20).
+services:
+  db:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: contratacao
+      POSTGRES_USER: contratacao
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?defina POSTGRES_PASSWORD no .env}
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U contratacao"]
+      interval: 10s
+  web:
+    build: .
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql://contratacao:${POSTGRES_PASSWORD}@db/contratacao
+    ports: ["127.0.0.1:8000:8000"]   # expor via reverse proxy (HTTPS), não diretamente
+    depends_on: { db: { condition: service_healthy } }
+  agendador:
+    build: .
+    restart: unless-stopped
+    command: ["python", "-m", "contratacao.agendador"]
+    environment:
+      DATABASE_URL: postgresql://contratacao:${POSTGRES_PASSWORD}@db/contratacao
+      SYNC_MAX_BACKFILL: ${SYNC_MAX_BACKFILL:-3}
+      SYNC_HORA: "6"
+      SYNC_MINUTO: "17"
+    depends_on: { db: { condition: service_healthy } }
+volumes:
+  pgdata:

@@ -14,7 +14,7 @@ Sistema que ingere os contratos públicos portugueses, calcula **indicadores de 
 | 0 — Reconhecimento | ✅ (ver "Achados da Fase 0") |
 | 1 — Skeleton: 1 ano, BD, 1 indicador, teste, lista básica | ✅ 2025 ingerido; indicador *concorrente único* |
 | 1b — Calibração do score (antecipada a pedido) | ✅ taxas de referência + score 0–100 por entidade |
-| 2 — Ingestão completa, scheduler diário, backfill, qualidade | ⏳ |
+| 2 — Ingestão completa, scheduler diário, backfill, qualidade | ✅ 2012–2026; sincronização diária; página `/qualidade` |
 | 3 — Todos os indicadores + lista completa | ⏳ |
 | 4 — Resolução de entidades + grafo temporal + perfis de entidade | ⏳ |
 | 5 — Perfis de pessoa + organigrama | ⏳ |
@@ -22,33 +22,56 @@ Sistema que ingere os contratos públicos portugueses, calcula **indicadores de 
 
 ## Arranque rápido
 
+### Produção (Docker)
+
+```bash
+echo "POSTGRES_PASSWORD=$(openssl rand -hex 16)" > .env
+docker compose up -d          # db + web (porta 8000, só localhost) + agendador
+```
+
+O agendador corre a sincronização ao arrancar e todos os dias às 06:17 (Europe/Lisbon). Pôr um reverse proxy com
+HTTPS (Caddy/nginx) à frente da porta 8000. Requisitos: ~10 GB de disco para a BD com 2012–2026; ~300 MB de RAM
+para a ingestão (lê em streaming).
+
+### Desenvolvimento
+
 ```bash
 pip install -r requirements.txt
 export DATABASE_URL=postgresql://user@localhost/contratacao   # PostgreSQL >= 14
-python -m contratacao.cli migrar
-python -m contratacao.cli ingerir --ano 2025        # descarrega de dados.gov.pt (~55 MB)
-python -m contratacao.cli pontuar
-uvicorn contratacao.api:app --port 8000             # http://localhost:8000
+python -m contratacao.cli sincronizar --max-backfill 20       # tudo de uma vez (~30 min)
+uvicorn contratacao.api:app --port 8000                       # http://localhost:8000
 ```
 
-Testes: `pytest` (o teste de integração corre se `TEST_DATABASE_URL` apontar para uma BD **descartável** —
-o teste apaga os schemas).
+Outros comandos: `migrar`, `ingerir --ano 2025 [--ficheiro x.zip]`, `pontuar`.
+Sem processo residente: cron do sistema, p.ex. `17 6 * * * cd /app && python -m contratacao.cli sincronizar`.
+
+Testes: `pytest` (os testes de integração correm se `TEST_DATABASE_URL` apontar para uma BD **descartável** —
+apagam os schemas).
 
 ## Arquitetura (atual)
 
 ```
-dados.gov.pt (ZIP/JSON anual, republicado semanalmente)
-  └─ fontes/base_impic.py   resolve URL pela API, descarrega, SHA-256 (ficheiro igual = ignorado)
+dados.gov.pt  API: lista os ZIP anuais com sha1 e data de versão (republicação semanal)
+  └─ sincronizacao.py   plano diário: anos com sha1 alterado → atualizar; anos em falta → backfill
+  │                     (do mais recente para o mais antigo, N por dia); lock contra execuções simultâneas
+  └─ fontes/base_impic.py   descarga, verificação sha1, leitura JSON em streaming (memória constante)
       └─ normalizacao.py    parsing + avisos de qualidade; nunca completa dados em falta
-          └─ PostgreSQL     COPY + upsert por (fonte, id_origem) com checksum por registo
-              └─ pontuacao.py + regras/   avaliação explicável por contrato
-                  └─ api.py (FastAPI) + static/   lista ordenável/filtrável, CSV, metodologia
+          └─ PostgreSQL     COPY → dedup em SQL → upsert por (fonte, id_origem) com checksum por registo;
+          │                 contratos que desaparecem da fonte são marcados (removido_da_fonte_em), nunca apagados
+          └─ pontuacao.py + regras/ + calibracao.py   avaliação explicável e calibrada (só se algo mudou)
+              └─ api.py (FastAPI) + static/   lista, CSV, /qualidade, /metodologia
+agendador.py (APScheduler, 06:17 Europe/Lisbon) → sincronizacao.executar()
 ```
 
 Decisão: **só PostgreSQL** (sem Neo4j por agora). A tabela `relacao` já é bitemporal
 (`valido_de/valido_ate` = quando existiu; `registado_em/substituido_em` = quando o soubemos) e tem
 `natureza` = `documentada` | `inferida` (inferidas exigem `confianca`). Reavaliar um motor de grafos na Fase 4
 se a performance o justificar.
+
+### Datas
+
+`data_referencia` = data de celebração; se a fonte não a tem, data de publicação (ex.: 26 718 ajustes diretos
+simplificados de 2020 ao abrigo do regime COVID, DL 10-A/2020, sem data de celebração). Os filtros de período usam-na.
 
 ## Modelo de dados (resumo)
 
@@ -59,8 +82,9 @@ se a performance o justificar.
 - `avaliacao_risco` — um resultado por contrato × indicador: `sinal | sem_sinal | nao_aplicavel | dados_insuficientes`,
   pontos, explicação e evidência.
 - `pessoa`, `relacao` — preparadas para as Fases 4-5 (`pessoa.removido_em` para pedidos de remoção RGPD).
-- `meta.execucao_ingestao`, `meta.problema_qualidade`, `meta.cobertura` — auditoria, relatório de qualidade
-  (`/api/qualidade`) e cobertura histórica (mostrada no topo da app).
+- `meta.sincronizacao` (uma por execução diária: plano e resumo), `meta.execucao_ingestao` (uma por ano carregado),
+  `meta.resumo_qualidade` (avisos agregados por tipo, com exemplos), `meta.problema_qualidade` (rejeições e ids
+  repetidos, um a um), `meta.cobertura` (estado por ano + versão da fonte). Visíveis em `/qualidade`.
 
 ## Indicadores
 
