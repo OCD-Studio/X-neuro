@@ -136,6 +136,18 @@ concurso público 12,6 %, consulta prévia 47,1 %. A soma simples de pontos favo
 listas de sanções UE/OFAC — viáveis. **Registo comercial**: sem acesso aberto em massa (certidão permanente paga;
 RCBE restrito desde o acórdão TJUE de 2022) → maior risco para pessoas/grafo; fazer prova de conceito antes da Fase 4.
 
+## Resultado da Fase 2 (2026-10-05)
+
+- **2 266 045 contratos** de 2012–2026 (15/15 anos), 213 072 entidades, BD com 6,7 GB.
+- Backfill completo: ~15 min (14 anos); memória do processo ~170 MB (streaming).
+- Sincronização diária sem alterações: ~1 s (só compara sha1; não descarrega nada).
+- Teste real de resiliência: um ano falhou (bloqueio causado por uma migração concorrente, entretanto corrigida
+  com o registo `meta.migracao`); os restantes continuaram e a execução seguinte recuperou-o sozinha.
+- 103 501 entidades (quase metade) estão identificadas só por nome, porque a fonte omite o NIF — sobretudo
+  pessoas singulares. Relevante para a resolução de entidades (Fase 4).
+- **Pendente para a Fase 3:** a lista sem filtros sobre o histórico completo demora ~7 s (com filtro de um ano ~2 s).
+  Solução prevista: tabela de agregados por entidade/ano/procedimento/distrito/CPV, atualizada na sincronização.
+
 ## Privacidade e RGPD
 
 - Dados de contratação são públicos por lei; aplica-se minimização: não enriquecemos dados de pessoas singulares
