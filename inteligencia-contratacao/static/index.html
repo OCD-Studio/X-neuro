@@ -30,6 +30,11 @@
   tbody tr:hover { background:var(--bg); }
   tr.detalhe td { white-space:normal; font-size:13px; background:var(--bg); cursor:default; }
   .detalhe ul { margin:4px 0; padding-left:18px; }
+  .detalhe li.zero { color:var(--mut); }
+  .detalhe table { margin-top:6px; font-size:12px; }
+  .detalhe td { white-space:normal; }
+  .nivel-alto { color:#b91c1c; } .nivel-medio { color:var(--acento); }
+  @media (prefers-color-scheme: dark) { .nivel-alto { color:#f87171; } }
 </style>
 </head>
 <body>
@@ -52,6 +57,7 @@ Um sinal <strong>não é prova nem acusação</strong>: pode ter justificação 
   <label>CPV (prefixo) <input name="cpv" size="9" placeholder="ex. 45"></label>
   <label>Valor mín. € <input type="number" name="valor_min" style="width:110px"></label>
   <label>Valor máx. € <input type="number" name="valor_max" style="width:110px"></label>
+  <label>Nível de risco <select name="nivel"><option value="">Todos</option><option value="alto">Alto (50–100)</option><option value="medio">Médio (20–49)</option><option value="baixo">Baixo (0–19)</option></select></label>
   <label>Score mín. <input type="number" name="score_min" style="width:80px"></label>
   <label>Nome/NIF <input name="q" size="16"></label>
   <button type="submit">Aplicar</button>
@@ -95,7 +101,7 @@ async function carregar() {
     const id = e.identificado_por === 'nif' ? 'NIF ' + e.nif : 'sem NIF na fonte';
     tr.innerHTML = `<td class="nome"></td><td class="num">${e.n_contratos}</td><td class="num">${eur.format(e.total)}</td>
       <td class="num">${eur.format(e.valor_medio)}</td><td class="num">${e.pct_ajuste_direto}%</td>
-      <td class="num">${e.n_sinais} / ${Number(e.esperados).toFixed(1)}</td><td class="num"><strong>${e.score}</strong></td>`;
+      <td class="num">${e.n_sinais} / ${Number(e.esperados).toFixed(1)}</td><td class="num"><strong class="nivel-${e.score >= 50 ? 'alto' : e.score >= 20 ? 'medio' : 'baixo'}">${e.score}</strong></td>`;
     tr.onclick = () => detalhe(tr, e.id);
     tr.cells[0].textContent = e.nome;
     const t = document.createElement('div'); t.className = 'tag'; t.textContent = id; tr.cells[0].append(t);
@@ -103,19 +109,45 @@ async function carregar() {
   }
   if (!corpo.children.length) corpo.innerHTML = '<tr><td colspan="7">Sem resultados.</td></tr>';
 }
+const filtrosAtuais = () => { const p = params(); ['ordenar','direcao','nivel','score_min','q'].forEach(k => p.delete(k)); return p; };
+const eurc = v => v == null ? '—' : new Intl.NumberFormat('pt-PT', { style:'currency', currency:'EUR', maximumFractionDigits:0 }).format(v);
 async function detalhe(tr, id) {
   const aberto = tr.nextElementSibling;
   if (aberto && aberto.classList.contains('detalhe')) { aberto.remove(); return; }
-  const d = await (await fetch(`/api/entidades/${id}/risco?papel=${f.papel.value}`)).json();
+  const fp = filtrosAtuais();
+  const d = await (await fetch(`/api/entidades/${id}/risco?${fp}`)).json();
   const linha = document.createElement('tr'); linha.className = 'detalhe';
   const td = linha.insertCell(); td.colSpan = 7;
   const t = document.createElement('div');
-  t.textContent = `Porquê este score (${d.score}/100)? Comparação com a taxa de referência do mesmo tipo de procedimento, setor (CPV) e ano. Indicador de risco, não prova.`;
+  t.textContent = `Porquê este score (${d.score}/100)? Média dos ${d.n_indicadores} indicadores com amostra suficiente (≥ 5 contratos avaliáveis). ` +
+    'Cada indicador compara a taxa de sinais desta entidade com a esperada para contratos comparáveis (procedimento, setor CPV, ano). Indicador de risco, não prova.';
   const ul = document.createElement('ul');
-  for (const i of d.indicadores) { const li = document.createElement('li'); li.textContent = `${i.nome}: ${i.score}/100 — ${i.explicacao}`; ul.append(li); }
-  const a = document.createElement('a'); a.href = `/api/contratos?entidade_id=${id}&sinal=concorrente_unico`; a.textContent = 'Ver contratos com sinal (JSON)';
-  td.append(t, ul, a);
+  for (const i of d.indicadores) {
+    if (!i.avaliaveis) continue;
+    const li = document.createElement('li'); if (!i.score) li.className = 'zero';
+    li.textContent = `${i.nome}: ${i.score}/100 — ${i.explicacao}`; ul.append(li);
+  }
+  const sub = document.createElement('div'); sub.textContent = 'Contratos com sinais (mais recentes):';
+  const tab = document.createElement('table');
+  td.append(t, ul, sub, tab);
   tr.after(linha);
+  const papel = f.papel.value;
+  const cs = await (await fetch(`/api/contratos?entidade_id=${id}&papel=${papel}&limite=200`)).json();
+  const comSinal = cs.resultados.filter(c => c.sinais).slice(0, 15);
+  tab.innerHTML = '<tr><th>Data</th><th>Objeto</th><th>Adjudicante</th><th>Valor</th><th>Sinais (pontos)</th><th>Fonte</th></tr>';
+  for (const c of comSinal) {
+    const r = tab.insertRow();
+    [c.data_celebracao || c.data_publicacao, c.objeto, c.adjudicante, eurc(c.preco_contratual)].forEach(v => r.insertCell().textContent = v ?? '—');
+    const cel = r.insertCell();
+    for (const s of c.sinais) {
+      const p = document.createElement('div');
+      p.textContent = `${s.nome} (${s.pontos}): ${s.explicacao || ''}` + (s.taxa_referencia != null ? ` [ocorre em ${Math.round(s.taxa_referencia * 100)}% dos casos comparáveis]` : '');
+      cel.append(p);
+    }
+    const a = document.createElement('a'); a.href = c.url_fonte; a.target = '_blank'; a.rel = 'noopener'; a.textContent = 'BASE';
+    r.insertCell().append(a);
+  }
+  if (!comSinal.length) tab.insertRow().insertCell().textContent = 'Sem sinais nos 200 contratos mais recentes.';
 }
 document.querySelectorAll('th[data-o]').forEach(th => th.onclick = () => {
   if (!th.dataset.o) return;

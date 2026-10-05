@@ -26,6 +26,18 @@ totalmente legais. Cada score é a soma transparente de sinais, e cada sinal mos
 <h2>Indicadores ativos</h2>
 <div id="indicadores" class="mut">a carregar…</div>
 
+<h2>Indicadores pedidos mas ainda bloqueados</h2>
+<ul id="bloqueados"></ul>
+
+<h2>Limiares legais usados</h2>
+<p>Os indicadores de ajuste direto usam a <strong>base legal invocada em cada contrato</strong> (campo “fundamentação” do Portal BASE):
+apenas ajustes diretos escolhidos em função do valor (CCP arts. 19.º e 20.º) têm limiar. Valores sem IVA:
+CCP versão DL 18/2008 — 150 000 € (empreitadas, art. 19.º a)) e 75 000 € (bens e serviços, art. 20.º n.º 1 a));
+CCP revisto pelo DL 111-B/2017 — 30 000 € (art. 19.º d)) e 20 000 € (art. 20.º n.º 1 d)).
+Ajustes diretos por critérios materiais (urgência, exclusividade…), regimes especiais e Regiões Autónomas não são avaliados por estes indicadores.
+<strong>Estes parâmetros devem ser validados juridicamente antes de uso público.</strong>
+O campo “critérios materiais” da fonte não é usado: é inconsistente com a fundamentação de milhares de contratos.</p>
+
 <h2>Como se calcula o score</h2>
 <ol>
   <li><strong>Por contrato:</strong> cada indicador devolve “sinal”, “sem sinal”, “não aplicável” ou “dados insuficientes”.
@@ -39,7 +51,9 @@ totalmente legais. Cada score é a soma transparente de sinais, e cada sinal mos
   conjunto de contratos. Usa-se o limite inferior do intervalo de confiança a 95 % (Wilson), para que poucas observações não gerem scores extremos:
   6 sinais em 6 contratos pesa menos do que 37 em 37. São precisos pelo menos 5 contratos avaliáveis; abaixo disso o score é 0 e a app diz porquê.
   O score não cresce com a dimensão da entidade: um fornecedor com muitos contratos mas em linha com o esperado tem score 0.</li>
-  <li>Com vários indicadores, o score da entidade será a média dos scores por indicador.</li>
+  <li><strong>Score final da entidade</strong> = média dos scores dos indicadores em que tem pelo menos 5 contratos avaliáveis.
+  A explicação mostra cada indicador separadamente, com os sinais observados e os esperados.</li>
+  <li>Níveis: <strong>alto</strong> 50–100, <strong>médio</strong> 20–49, <strong>baixo</strong> 0–19. São faixas de triagem, não juízos.</li>
 </ol>
 
 <h2>Fontes</h2>
@@ -86,12 +100,16 @@ não enriquecemos dados de pessoas singulares que sejam apenas fornecedores, e q
 fetch('/api/meta').then(r => r.json()).then(m => {
   const el = document.getElementById('indicadores'); el.className = ''; el.innerHTML = '';
   const t = document.createElement('table');
-  t.innerHTML = '<tr><th>Indicador</th><th>Pontos</th><th>O que mede</th><th>Quando pode ser legítimo</th></tr>';
+  t.innerHTML = '<tr><th>Indicador</th><th>O que mede</th><th>Quando pode ser legítimo</th><th>Parâmetros e referência</th></tr>';
   for (const i of m.indicadores) {
     const tr = t.insertRow();
-    [i.nome, i.pontos, i.descricao, i.limites].forEach(v => tr.insertCell().textContent = v);
+    [i.nome, i.descricao, i.limites,
+     Object.entries(i.parametros || {}).map(([k, v]) => `${k}: ${Array.isArray(v) ? v.join(', ') : v}`).join('; ') + ' — ' + i.referencia]
+      .forEach(v => tr.insertCell().textContent = v);
   }
   el.append(t);
+  const ul = document.getElementById('bloqueados');
+  for (const b of m.indicadores_bloqueados) { const li = document.createElement('li'); li.textContent = `${b.nome}: ${b.motivo}`; ul.append(li); }
 });
 </script>
 </body>

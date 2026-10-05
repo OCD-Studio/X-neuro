@@ -76,11 +76,10 @@ def test_carga_resolucao_e_idempotencia(con):
 
 
 def test_score_sql_igual_ao_python(con):
-    """A fórmula do score em SQL (api.py) tem de dar o mesmo que calibracao.score_entidade."""
+    """O score da lista (SQL, caminho rápido e caminho por contratos) = explicação (Python)."""
     from fastapi.testclient import TestClient
 
     import contratacao.api as api
-    from contratacao.calibracao import score_entidade
 
     ent = "504615947 - Entidade A"
     registos = []
@@ -98,10 +97,15 @@ def test_score_sql_igual_ao_python(con):
     api.bd.ligar = lambda url=None: orig(URL)
     try:
         cli = TestClient(api.app)
-        lista = {r["nif"]: r for r in cli.get("/api/entidades").json()["resultados"]}
-        det = cli.get(f"/api/entidades/{lista['500697370']['id']}/risco").json()
+        rapido = cli.get("/api/entidades").json()
+        filtrado = cli.get("/api/entidades?distrito=Porto").json()
+        assert rapido["caminho"] == "agregados" and filtrado["caminho"] == "contratos"
+        x_r = {r["nif"]: r for r in rapido["resultados"]}["500697370"]
+        x_f = {r["nif"]: r for r in filtrado["resultados"]}["500697370"]
+        det = cli.get(f"/api/entidades/{x_r['id']}/risco").json()
     finally:
         api.bd.ligar = orig
-    x = lista["500697370"]
-    esperado = score_entidade(x["n_sinais"], float(x["esperados"]), x["n_avaliaveis"])
-    assert x["score"] == esperado.score == det["score"] > 0
+    cu = next(d for d in det["indicadores"] if d["indicador"] == "concorrente_unico")
+    assert cu["observados"] == 6 and cu["avaliaveis"] == 8 and cu["score"] > 0
+    assert x_r["score"] == x_f["score"] == det["score"] > 0
+    assert x_r["n_sinais"] == x_f["n_sinais"]

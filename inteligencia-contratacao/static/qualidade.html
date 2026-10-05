@@ -57,6 +57,9 @@ Fonte: Portal BASE (IMPIC) via dados.gov.pt, republicada semanalmente; verificad
 
 <script>
 const nf = new Intl.NumberFormat('pt-PT');
+// plano antigo: {atualizar, backfill}; novo: {fonte: {atualizar, backfill}}
+const anosPlano = p => p.atualizar ? [...p.atualizar, ...p.backfill]
+  : Object.entries(p).flatMap(([f, x]) => [...x.atualizar, ...x.backfill].map(a => (f === 'base_anuncios' ? 'anúncios ' : '') + a));
 const dt = s => s ? new Date(s).toLocaleString('pt-PT') : '—';
 function tabela(id, cab, linhas) {
   const t = document.getElementById(id); t.innerHTML = '';
@@ -70,6 +73,10 @@ fetch('/api/qualidade').then(r => r.json()).then(q => {
     ? `Última verificação: ${dt(ult.terminado_em || ult.iniciado_em)} (${ult.estado})` : 'Ainda sem verificações.';
   const barra = document.getElementById('barra');
   for (const c of [...q.cobertura].reverse()) { const s = document.createElement('span'); s.className = c.estado; s.textContent = c.ano; s.title = c.estado; barra.append(s); }
+  const an = q.cobertura_anuncios.filter(c => c.estado === 'ingerido');
+  const pAn = document.createElement('p'); pAn.className = 'mut';
+  pAn.textContent = `Anúncios de procedimento (para prazos de proposta): ${an.length} de ${q.cobertura_anuncios.length} anos carregados, ${nf.format(an.reduce((a, c) => a + (c.n_registos || 0), 0))} anúncios.`;
+  barra.after(pAn);
   tabela('t-cob', ['Ano', 'Estado', 'Contratos', 'Versão da fonte', 'Última carga', 'Lidos', 'Novos', 'Alterados', 'Rejeitados'],
     q.cobertura.map(c => [[c.ano], [c.estado, c.estado], [c.n_registos != null ? nf.format(c.n_registos) : null, 'num'],
       [dt(c.versao_fonte)], [dt(c.terminado_em)], [c.lidos != null ? nf.format(c.lidos) : null, 'num'],
@@ -99,7 +106,7 @@ fetch('/api/qualidade').then(r => r.json()).then(q => {
   }
   tabela('t-sinc', ['#', 'Início', 'Fim', 'Estado', 'Anos processados', 'Falhas', 'Adiados'],
     q.sincronizacoes.map(s => [[s.id], [dt(s.iniciado_em)], [dt(s.terminado_em)], [s.estado, s.estado],
-      [s.plano ? [...s.plano.atualizar, ...s.plano.backfill].join(', ') || 'nenhum (sem alterações)' : '—'],
+      [s.plano ? anosPlano(s.plano).join(', ') || 'nenhum (sem alterações)' : '—'],
       [(s.falhas || []).join(', ') || '—'], [(s.adiados || []).join(', ') || '—']]));
 });
 </script>
