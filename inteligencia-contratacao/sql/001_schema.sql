@@ -52,7 +52,9 @@ CREATE TABLE IF NOT EXISTS meta.cobertura (
 -- ---------------------------------------------------------------- núcleo
 CREATE TABLE IF NOT EXISTS entidade (
     id              BIGSERIAL PRIMARY KEY,
-    nif             TEXT NOT NULL UNIQUE,
+    chave           TEXT NOT NULL UNIQUE,    -- NIF, ou 'nome:<nome normalizado>' se a fonte omite o NIF
+    nif             TEXT,                    -- NULL quando a fonte não publica NIF
+    identificado_por TEXT NOT NULL CHECK (identificado_por IN ('nif','nome')),
     nome            TEXT NOT NULL,           -- nome mais recente visto
     nif_valido      BOOLEAN NOT NULL,
     primeiro_visto  DATE,
@@ -62,6 +64,8 @@ CREATE TABLE IF NOT EXISTS entidade (
 );
 
 -- Variantes de nome por NIF (resolução de entidades; auditável).
+CREATE INDEX IF NOT EXISTS ix_entidade_nif ON entidade(nif);
+
 CREATE TABLE IF NOT EXISTS entidade_nome (
     entidade_id     BIGINT NOT NULL REFERENCES entidade(id) ON DELETE CASCADE,
     nome            TEXT NOT NULL,
@@ -74,6 +78,7 @@ CREATE TABLE IF NOT EXISTS contrato (
     id                      BIGSERIAL PRIMARY KEY,
     fonte                   TEXT NOT NULL DEFAULT 'base_contratos',
     id_origem               TEXT NOT NULL,
+    id_procedimento         TEXT,
     adjudicante_id          BIGINT NOT NULL REFERENCES entidade(id),
     tipo_contrato           TEXT,
     procedimento            TEXT NOT NULL,
@@ -81,6 +86,7 @@ CREATE TABLE IF NOT EXISTS contrato (
     objeto                  TEXT,
     data_publicacao         DATE,
     data_celebracao         DATE,
+    data_decisao_adjudicacao DATE,
     preco_contratual        NUMERIC(16,2),
     preco_base              NUMERIC(16,2),
     preco_efetivo           NUMERIC(16,2),
@@ -90,6 +96,8 @@ CREATE TABLE IF NOT EXISTS contrato (
     concelho                TEXT,
     n_concorrentes          INTEGER,         -- NULL = desconhecido na fonte
     fundamento_ajuste_direto TEXT,
+    regime                  TEXT,
+    criterio_adjudicacao    TEXT,
     ano                     SMALLINT,
     checksum                TEXT NOT NULL,
     dados_origem            JSONB NOT NULL,  -- registo original, para auditoria
