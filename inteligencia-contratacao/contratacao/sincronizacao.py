@@ -26,7 +26,7 @@ import psycopg
 
 from . import pontuacao
 from .config import FONTE_CONTRATOS
-from .fontes import base_impic
+from .fontes import base_anuncios, base_impic
 from .fontes.base_impic import Recurso
 
 log = logging.getLogger(__name__)
@@ -74,24 +74,30 @@ def planear(recursos: dict[int, Recurso], cobertura: dict[int, EstadoAno],
     return p
 
 
-def ler_cobertura(con: psycopg.Connection) -> dict[int, EstadoAno]:
+@dataclass(frozen=True)
+class Fonte:
+    nome: str
+    listar: Callable[[], dict[int, Recurso]]
+    ingerir: Callable[[psycopg.Connection, Recurso, int], dict[str, Any]]
+
+
+def ler_cobertura(con: psycopg.Connection, fonte: str = FONTE_CONTRATOS) -> dict[int, EstadoAno]:
     return {
         l["ano"]: EstadoAno(l["estado"], l["checksum_fonte"])
-        for l in con.execute(
-            "SELECT ano, estado, checksum_fonte FROM meta.cobertura WHERE fonte = %s", (FONTE_CONTRATOS,))
+        for l in con.execute("SELECT ano, estado, checksum_fonte FROM meta.cobertura WHERE fonte = %s", (fonte,))
     }
 
 
-def registar_disponiveis(con: psycopg.Connection, recursos: dict[int, Recurso]) -> None:
+def registar_disponiveis(con: psycopg.Connection, recursos: dict[int, Recurso], fonte: str = FONTE_CONTRATOS) -> None:
     """Garante uma linha de cobertura 'pendente' para cada ano publicado."""
     for ano in recursos:
         con.execute(
             "INSERT INTO meta.cobertura (fonte, ano, estado) VALUES (%s, %s, 'pendente') ON CONFLICT DO NOTHING",
-            (FONTE_CONTRATOS, ano))
+            (fonte, ano))
     con.commit()
 
 
-def _ingerir_recurso(con: psycopg.Connection, rec: Recurso, sincronizacao_id: int) -> dict[str, Any]:
+def _ingerir_contratos(con: psycopg.Connection, rec: Recurso, sincronizacao_id: int) -> dict[str, Any]:
     caminho, sha256, sha1 = base_impic.descarregar(rec.url)
     try:
         if rec.sha1 and sha1 != rec.sha1:
@@ -109,56 +115,77 @@ def _ingerir_recurso(con: psycopg.Connection, rec: Recurso, sincronizacao_id: in
         caminho.unlink(missing_ok=True)  # o ficheiro bruto não é necessário depois da carga
 
 
+FONTES = [
+    Fonte(FONTE_CONTRATOS, base_impic.listar_recursos, _ingerir_contratos),
+    Fonte(base_anuncios.FONTE_ANUNCIOS, base_anuncios.listar_recursos, base_anuncios.ingerir_recurso),
+]
+
+
 def executar(
     con: psycopg.Connection,
     *,
     max_backfill: int = MAX_BACKFILL_POR_EXECUCAO,
-    listar: Callable[[], dict[int, Recurso]] = base_impic.listar_recursos,
-    ingerir: Callable[[psycopg.Connection, Recurso, int], dict[str, Any]] = _ingerir_recurso,
+    fontes: list[Fonte] | None = None,
+    listar: Callable[[], dict[int, Recurso]] | None = None,
+    ingerir: Callable[[psycopg.Connection, Recurso, int], dict[str, Any]] | None = None,
     pontuar: bool = True,
 ) -> dict[str, Any]:
+    """Executa a rotina para cada fonte (por omissão: contratos e anúncios). `listar`/`ingerir`
+    permitem substituir só a fonte de contratos (testes)."""
+    if fontes is None:
+        fontes = [Fonte(FONTE_CONTRATOS, listar, ingerir)] if listar and ingerir else FONTES
     if not con.execute("SELECT pg_try_advisory_lock(%s) AS ok", (LOCK_ID,)).fetchone()["ok"]:
         log.warning("Outra sincronização está a correr; a sair.")
         return {"estado": "ocupado"}
     sid = con.execute("INSERT INTO meta.sincronizacao DEFAULT VALUES RETURNING id").fetchone()["id"]
     con.commit()
     try:
-        recursos = listar()
-        registar_disponiveis(con, recursos)
-        plano = planear(recursos, ler_cobertura(con), max_backfill)
-        con.execute("UPDATE meta.sincronizacao SET plano=%s WHERE id=%s", (json.dumps(asdict(plano)), sid))
-        con.commit()
-        log.info("Plano: %s", asdict(plano))
-
-        resultados: dict[int, Any] = {}
+        planos: dict[str, Plano] = {}
+        resultados: dict[str, dict[int, Any]] = {}
         alterou = False
-        for ano in plano.anos:
-            try:
-                r = ingerir(con, recursos[ano], sid)
-                resultados[ano] = r
-                alterou |= bool(r.get("inseridos") or r.get("atualizados"))
-            except Exception as e:  # um ano falhado não trava os outros
-                con.rollback()
-                log.exception("Falhou a ingestão de %s", ano)
-                resultados[ano] = {"erro": repr(e)}
-                con.execute(
-                    "INSERT INTO meta.execucao_ingestao (fonte, ano, estado, terminado_em, erro, sincronizacao_id) "
-                    "VALUES (%s,%s,'falhou',clock_timestamp(),%s,%s)", (FONTE_CONTRATOS, ano, repr(e), sid))
-                con.execute(
-                    "UPDATE meta.cobertura SET estado='falhou', atualizado_em=now() "
-                    "WHERE fonte=%s AND ano=%s AND estado <> 'ingerido'", (FONTE_CONTRATOS, ano))
-                con.commit()
+        for fonte in fontes:
+            recursos = fonte.listar()
+            registar_disponiveis(con, recursos, fonte.nome)
+            plano = planear(recursos, ler_cobertura(con, fonte.nome), max_backfill)
+            planos[fonte.nome] = plano
+            con.execute("UPDATE meta.sincronizacao SET plano=%s WHERE id=%s",
+                        (json.dumps({n: asdict(p) for n, p in planos.items()}), sid))
+            con.commit()
+            log.info("Plano %s: %s", fonte.nome, asdict(plano))
+            res_f: dict[int, Any] = {}
+            for ano in plano.anos:
+                try:
+                    r = fonte.ingerir(con, recursos[ano], sid)
+                    res_f[ano] = r
+                    alterou |= bool(r.get("inseridos") or r.get("atualizados"))
+                except Exception as e:  # um ano falhado não trava os outros
+                    con.rollback()
+                    log.exception("Falhou a ingestão de %s %s", fonte.nome, ano)
+                    res_f[ano] = {"erro": repr(e)}
+                    con.execute(
+                        "INSERT INTO meta.execucao_ingestao (fonte, ano, estado, terminado_em, erro, sincronizacao_id) "
+                        "VALUES (%s,%s,'falhou',clock_timestamp(),%s,%s)", (fonte.nome, ano, repr(e), sid))
+                    con.execute(
+                        "UPDATE meta.cobertura SET estado='falhou', atualizado_em=now() "
+                        "WHERE fonte=%s AND ano=%s AND estado <> 'ingerido'", (fonte.nome, ano))
+                    con.commit()
+            resultados[fonte.nome] = res_f
 
         pont = pontuacao.recalcular(con) if (pontuar and alterou) else None
-        falhas = [a for a, r in resultados.items() if "erro" in r]
-        estado = "concluido" if not falhas else ("parcial" if len(falhas) < len(resultados) else "falhou")
-        resumo = {"resultados": resultados, "pontuacao_recalculada": pont is not None,
-                  "falhas": falhas, "adiados": plano.adiados,
-                  "deixaram_de_ser_publicados": plano.deixaram_de_ser_publicados}
+        falhas = [f"{f}:{a}" if len(fontes) > 1 else a
+                  for f, rs in resultados.items() for a, r in rs.items() if "erro" in r]
+        n_total = sum(len(rs) for rs in resultados.values())
+        estado = "concluido" if not falhas else ("parcial" if len(falhas) < n_total else "falhou")
+        principal = planos[fontes[0].nome]
+        resumo = {"resultados": resultados if len(fontes) > 1 else resultados[fontes[0].nome],
+                  "pontuacao_recalculada": pont is not None, "falhas": falhas,
+                  "adiados": principal.adiados if len(fontes) == 1 else {n: p.adiados for n, p in planos.items()},
+                  "deixaram_de_ser_publicados": principal.deixaram_de_ser_publicados}
         con.execute("UPDATE meta.sincronizacao SET estado=%s, terminado_em=clock_timestamp(), resumo=%s WHERE id=%s",
                     (estado, json.dumps(resumo, default=str), sid))
         con.commit()
-        return {"sincronizacao_id": sid, "estado": estado, "plano": asdict(plano), **resumo}
+        plano_out = asdict(principal) if len(fontes) == 1 else {n: asdict(p) for n, p in planos.items()}
+        return {"sincronizacao_id": sid, "estado": estado, "plano": plano_out, **resumo}
     except Exception as e:
         con.rollback()
         con.execute("UPDATE meta.sincronizacao SET estado='falhou', terminado_em=clock_timestamp(), erro=%s "
