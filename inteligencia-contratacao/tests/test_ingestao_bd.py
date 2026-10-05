@@ -73,3 +73,35 @@ def test_carga_resolucao_e_idempotencia(con):
     assert cont["concorrente_unico:sinal"] == 1
     assert cont["concorrente_unico:sem_sinal"] == 1
     assert cont["concorrente_unico:dados_insuficientes"] == 1
+
+
+def test_score_sql_igual_ao_python(con):
+    """A fórmula do score em SQL (api.py) tem de dar o mesmo que calibracao.score_entidade."""
+    from fastapi.testclient import TestClient
+
+    import contratacao.api as api
+    from contratacao.calibracao import score_entidade
+
+    ent = "504615947 - Entidade A"
+    registos = []
+    # referência: 40 concursos públicos com 4 concorrentes (taxa base baixa)
+    for i in range(40):
+        registos.append(reg(f"b{i}", ent, ["510728189 - Forn Y"], ["510728189-Y", "500697370-X", "1-Z", "2-W"]))
+    # fornecedor X: 8 concursos, 6 com concorrente único
+    for i in range(8):
+        conc = ["500697370-X"] if i < 6 else ["500697370-X", "510728189-Y"]
+        registos.append(reg(f"x{i}", ent, ["500697370 - Forn X"], conc))
+    carregar(con, registos, ano=2025, url=None, sha256="s")
+    pontuacao.recalcular(con)
+
+    orig = api.bd.ligar
+    api.bd.ligar = lambda url=None: orig(URL)
+    try:
+        cli = TestClient(api.app)
+        lista = {r["nif"]: r for r in cli.get("/api/entidades").json()["resultados"]}
+        det = cli.get(f"/api/entidades/{lista['500697370']['id']}/risco").json()
+    finally:
+        api.bd.ligar = orig
+    x = lista["500697370"]
+    esperado = score_entidade(x["n_sinais"], float(x["esperados"]), x["n_avaliaveis"])
+    assert x["score"] == esperado.score == det["score"] > 0

@@ -18,6 +18,7 @@ from fastapi.responses import FileResponse, StreamingResponse
 from . import bd
 from .config import RAIZ
 from .normalizacao import PROCEDIMENTOS
+from .calibracao import MIN_CONTRATOS_ENTIDADE, Z_CONFIANCA, score_entidade
 from .regras import INDICADORES
 
 app = FastAPI(title="Inteligência de Contratação Pública — sinais de risco")
@@ -29,6 +30,7 @@ ORDENACOES = {
     "valor_medio": "valor_medio",
     "pct_ajuste_direto": "pct_ajuste_direto",
     "n_sinais": "n_sinais",
+    "pontos": "pontos",
 }
 
 
@@ -129,26 +131,60 @@ def entidades(
         if papel == "adjudicante"
         else "JOIN contrato_adjudicatario ca ON ca.contrato_id = k.id JOIN entidade e ON e.id = ca.entidade_id"
     )
-    having = []
-    if score_min is not None:
-        having.append("coalesce(sum(r.pontos),0) >= %(smin)s"); par["smin"] = score_min
     if q:
         where += " AND (e.nome ILIKE %(q)s OR e.nif = %(qnif)s)"; par["q"] = f"%{q}%"; par["qnif"] = q
+    filtro_score = ""
+    if score_min is not None:
+        filtro_score = "WHERE coalesce(f.score, 0) >= %(smin)s"; par["smin"] = score_min
+    par.update(nmin=MIN_CONTRATOS_ENTIDADE, z=Z_CONFIANCA, n_ind=len(INDICADORES))
     sql = f"""
-        SELECT e.id, e.nif, e.identificado_por, e.nome,
-               count(DISTINCT k.id) AS n_contratos,
-               coalesce(sum(k.preco_contratual),0) AS total,
-               round(avg(k.preco_contratual),2) AS valor_medio,
-               round(100.0 * count(*) FILTER (WHERE k.procedimento IN ('ajuste_direto','ajuste_direto_simplificado')) / count(*), 1) AS pct_ajuste_direto,
-               coalesce(sum(r.pontos),0) AS score,
-               coalesce(sum(r.n),0) AS n_sinais
-        FROM contrato k
-        {juncao}
-        LEFT JOIN (SELECT contrato_id, sum(pontos) AS pontos, count(*) AS n
-                   FROM avaliacao_risco WHERE estado = 'sinal' GROUP BY 1) r ON r.contrato_id = k.id
-        WHERE {where}
-        GROUP BY e.id
-        {"HAVING " + " AND ".join(having) if having else ""}
+        WITH base AS (
+            SELECT e.id AS eid, k.id AS kid, k.preco_contratual, k.procedimento
+            FROM contrato k {juncao}
+            WHERE {where}
+        ),
+        ag AS (
+            SELECT eid, count(*) AS n_contratos,
+                   coalesce(sum(preco_contratual), 0) AS total,
+                   round(avg(preco_contratual), 2) AS valor_medio,
+                   round(100.0 * count(*) FILTER (WHERE procedimento IN ('ajuste_direto','ajuste_direto_simplificado')) / count(*), 1) AS pct_ajuste_direto
+            FROM base GROUP BY eid
+        ),
+        ind AS (  -- por entidade x indicador: O observados, E esperados, N avaliáveis
+            SELECT b.eid, r.indicador,
+                   count(*) FILTER (WHERE r.estado = 'sinal') AS o,
+                   sum(r.taxa_referencia) AS e,
+                   count(*) AS n,
+                   sum(r.pontos) AS pontos
+            FROM base b JOIN avaliacao_risco r ON r.contrato_id = b.kid
+            WHERE r.estado IN ('sinal', 'sem_sinal') AND r.taxa_referencia IS NOT NULL
+            GROUP BY 1, 2
+        ),
+        wl AS (  -- limite inferior de Wilson (igual a calibracao.wilson_inferior)
+            SELECT *, e / n AS p_esp,
+                   ((o::numeric / n) + %(z)s ^ 2 / (2 * n)
+                     - %(z)s * sqrt((o::numeric / n) * (1 - o::numeric / n) / n + %(z)s ^ 2 / (4 * n * n)))
+                   / (1 + %(z)s ^ 2 / n) AS l
+            FROM ind
+        ),
+        sc AS (  -- mesma fórmula de calibracao.score_entidade (testada para equivalência)
+            SELECT eid, o, e, n, pontos,
+                   CASE WHEN n < %(nmin)s OR l <= p_esp THEN 0
+                        WHEN p_esp >= 1 THEN 100
+                        ELSE least(100, round(100 * (l - p_esp) / (1 - p_esp))) END AS score
+            FROM wl
+        ),
+        f AS (
+            SELECT eid, round(sum(score)::numeric / %(n_ind)s) AS score, sum(o) AS n_sinais,
+                   round(sum(e), 1) AS esperados, sum(n) AS n_avaliaveis, sum(pontos) AS pontos
+            FROM sc GROUP BY eid
+        )
+        SELECT e.id, e.nif, e.identificado_por, e.nome, ag.n_contratos, ag.total, ag.valor_medio,
+               ag.pct_ajuste_direto, coalesce(f.score, 0) AS score, coalesce(f.n_sinais, 0) AS n_sinais,
+               coalesce(f.esperados, 0) AS esperados, coalesce(f.n_avaliaveis, 0) AS n_avaliaveis,
+               coalesce(f.pontos, 0) AS pontos
+        FROM ag JOIN entidade e ON e.id = ag.eid LEFT JOIN f ON f.eid = ag.eid
+        {filtro_score}
         ORDER BY {ORDENACOES[ordenar]} {direcao} NULLS LAST, e.id
         LIMIT %(lim)s OFFSET %(off)s
     """
@@ -163,6 +199,39 @@ def entidades(
         return StreamingResponse(iter([buf.getvalue()]), media_type="text/csv",
                                  headers={"Content-Disposition": f"attachment; filename=entidades_{papel}.csv"})
     return {"papel": papel, "resultados": linhas}
+
+
+@app.get("/api/entidades/{entidade_id}/risco")
+def risco_entidade(entidade_id: int, papel: Literal["adjudicante", "fornecedor"] = "fornecedor"):
+    """Explicação do score de uma entidade, indicador a indicador."""
+    juncao = (
+        "k.adjudicante_id = %(e)s" if papel == "adjudicante"
+        else "EXISTS (SELECT 1 FROM contrato_adjudicatario ca WHERE ca.contrato_id = k.id AND ca.entidade_id = %(e)s)"
+    )
+    with bd.ligar() as con:
+        ent = con.execute("SELECT id, nif, identificado_por, nome FROM entidade WHERE id = %(e)s", {"e": entidade_id}).fetchone()
+        if not ent:
+            raise HTTPException(404, "entidade não encontrada")
+        linhas = con.execute(
+            f"""
+            SELECT r.indicador, count(*) FILTER (WHERE r.estado = 'sinal') AS o,
+                   coalesce(sum(r.taxa_referencia), 0) AS e,
+                   count(*) AS n
+            FROM contrato k JOIN avaliacao_risco r ON r.contrato_id = k.id
+            WHERE {juncao} AND r.estado IN ('sinal', 'sem_sinal') AND r.taxa_referencia IS NOT NULL
+            GROUP BY 1
+            """,
+            {"e": entidade_id},
+        ).fetchall()
+    por_ind = {l["indicador"]: l for l in linhas}
+    detalhe = []
+    for ind in INDICADORES:
+        l = por_ind.get(ind.codigo, {"o": 0, "e": 0, "n": 0})
+        s = score_entidade(l["o"], float(l["e"]), l["n"])
+        detalhe.append({"indicador": ind.codigo, "nome": ind.nome, "score": s.score, "observados": s.observados,
+                        "esperados": round(s.esperados, 1), "avaliaveis": s.avaliaveis, "explicacao": s.motivo})
+    return {"entidade": ent, "papel": papel,
+            "score": round(sum(d["score"] for d in detalhe) / len(INDICADORES)), "indicadores": detalhe}
 
 
 @app.get("/api/contratos")
