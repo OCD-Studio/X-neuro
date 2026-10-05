@@ -25,13 +25,15 @@ from collections import Counter
 import psycopg
 from psycopg import sql as psql
 
-from .calibracao import MIN_AMOSTRA_REF
+from .calibracao import MIN_AMOSTRA_REF, MIN_CONTRATOS_ENTIDADE, Z_CONFIANCA
+from .consultas import sql_score
 from .regras import INDICADORES_SQL, TODOS, ContratoAvaliavel, avaliar
 from .regras.limiares import LIMIAR_AJUSTE_DIRETO, SQL_TABELA_LIMIAR
 
 log = logging.getLogger(__name__)
 LOTE = 20_000
-TABELAS = ("referencia_risco", "avaliacao_risco", "avaliacao_detalhe", "agregado_entidade_ano", "agregado_risco_ano")
+TABELAS = ("referencia_risco", "avaliacao_risco", "avaliacao_detalhe", "agregado_entidade_ano", "agregado_risco_ano",
+           "resumo_entidade")
 
 _SQL_CONTRATOS = """
     SELECT k.id, k.procedimento, k.n_concorrentes, k.preco_contratual, k.preco_base, k.preco_efetivo,
@@ -203,6 +205,23 @@ def recalcular(con: psycopg.Connection) -> dict[str, int]:
         """
     )
 
+    # resumo por entidade para todo o histórico (vista por omissão da lista; mesma fórmula que a API)
+    cur.execute(
+        f"""
+        INSERT INTO novo.resumo_entidade
+        WITH ind AS (SELECT papel, entidade_id AS eid, indicador_id, sum(o) AS o, sum(e)::float8 AS e,
+                            sum(n) AS n, sum(pontos) AS pontos
+                     FROM novo.agregado_risco_ano GROUP BY 1, 2, 3),
+             {sql_score("papel, eid")},
+             ag AS (SELECT papel, entidade_id AS eid, sum(n_contratos) AS n_contratos, sum(total) AS total,
+                           sum(n_ajuste_direto) AS n_ad FROM novo.agregado_entidade_ano GROUP BY 1, 2)
+        SELECT ag.papel, ag.eid, ag.n_contratos, ag.total, ag.n_ad, coalesce(f.score, 0), coalesce(f.n_indicadores, 0),
+               coalesce(f.n_sinais, 0), coalesce(f.esperados, 0), coalesce(f.n_avaliaveis, 0), coalesce(f.pontos, 0)
+        FROM ag LEFT JOIN f ON f.papel = ag.papel AND f.eid = ag.eid
+        """,
+        {"z": Z_CONFIANCA, "nmin": MIN_CONTRATOS_ENTIDADE},
+    )
+
     # índices (criados depois da carga: mais rápido)
     cur.execute(
         """
@@ -212,6 +231,7 @@ def recalcular(con: psycopg.Connection) -> dict[str, int]:
         ALTER TABLE novo.agregado_entidade_ano ADD PRIMARY KEY (papel, entidade_id, ano);
         ALTER TABLE novo.agregado_risco_ano ADD PRIMARY KEY (papel, entidade_id, ano, indicador_id);
         CREATE INDEX ON novo.agregado_entidade_ano (papel, ano);
+        ALTER TABLE novo.resumo_entidade ADD PRIMARY KEY (papel, entidade_id);
         """
     )
 
