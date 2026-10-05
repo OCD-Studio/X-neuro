@@ -186,3 +186,16 @@ def test_prazo_curto_com_prorrogacao(con):
                      "JOIN indicador i ON i.id = d.indicador_id "
                      "WHERE k.id_origem = 'k_curto' AND i.codigo = 'prazo_curto'").fetchone()["evidencia"]
     assert ev["dias"] == 5 and ev["p10"] == 20
+
+
+def test_anuncio_com_valor_implausivel_e_guardado_e_assinalado(con):
+    from contratacao.fontes.base_anuncios import carregar as carregar_anuncios
+    r = {"IdIncm": "x1", "dataPublicacao": "01/03/2020", "nifEntidade": "504615947", "descricaoAnuncio": "X",
+         "tipoActo": "Anúncio de procedimento", "tiposContrato": ["Aquisição de serviços"],
+         "PrecoBase": "34000000000000000.00", "CPVs": [], "modeloAnuncio": "Concurso público", "Ano": 2020,
+         "PrazoPropostas": 10, "DataLimitePropostas": "11/03/2020"}
+    res = carregar_anuncios(con, iter([r]), ano=2020, url=None, sha256="z")
+    assert res["inseridos"] == 1
+    assert str(con.execute("SELECT preco_base FROM anuncio").fetchone()["preco_base"]) == "34000000000000000.00"
+    tipos = [l["tipo"] for l in con.execute("SELECT tipo FROM meta.resumo_qualidade")]
+    assert "preço base implausível (> 10 mil milhões €)" in tipos

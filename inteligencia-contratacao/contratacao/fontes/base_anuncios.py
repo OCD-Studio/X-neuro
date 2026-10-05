@@ -25,6 +25,7 @@ from .base_impic import Recurso, _Qualidade, descarregar  # noqa: F401  (reutili
 
 DATASET_ANUNCIOS = "contratos-publicos-portal-base-impic-anuncios-de-2012-a-2026"
 FONTE_ANUNCIOS = "base_anuncios"
+VALOR_IMPLAUSIVEL = 10_000_000_000  # 10 mil milhões €: acima disto é quase certamente erro de registo
 
 
 def listar_recursos(cliente: httpx.Client | None = None) -> dict[int, Recurso]:
@@ -81,6 +82,8 @@ def carregar(con: psycopg.Connection, registos: Iterable[dict[str, Any]], *, ano
                 rejeitados += 1
                 q.add(None, "rejeitado", "anúncio sem IdIncm", detalhe=True)
                 continue
+            if linha[9] is not None and linha[9] > VALOR_IMPLAUSIVEL:
+                q.add(linha[0], "aviso", f"preço base implausível (> 10 mil milhões €): {linha[9]}", detalhe=True)
             if linha[11] is None:
                 q.add(linha[0], "aviso", "prazo de propostas em falta ou zero")
             if linha[12] is None:
