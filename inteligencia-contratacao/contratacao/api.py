@@ -21,7 +21,16 @@ from .normalizacao import PROCEDIMENTOS
 from .calibracao import MIN_CONTRATOS_ENTIDADE, Z_CONFIANCA, score_entidade
 from .regras import INDICADORES
 
-app = FastAPI(title="Inteligência de Contratação Pública — sinais de risco")
+from contextlib import asynccontextmanager
+
+
+@asynccontextmanager
+async def _arranque(_app):
+    bd.migrar()  # idempotente; garante o schema mesmo antes da primeira sincronização
+    yield
+
+
+app = FastAPI(title="Inteligência de Contratação Pública — sinais de risco", lifespan=_arranque)
 
 ORDENACOES = {
     "total": "total",
@@ -44,16 +53,28 @@ def pagina_metodologia():
     return FileResponse(RAIZ / "static" / "metodologia.html")
 
 
+@app.get("/qualidade", include_in_schema=False)
+def pagina_qualidade():
+    return FileResponse(RAIZ / "static" / "qualidade.html")
+
+
 @app.get("/api/meta")
 def meta():
-    """Última atualização, cobertura histórica e indicadores ativos."""
+    """Última verificação/atualização, cobertura histórica e indicadores ativos."""
     with bd.ligar() as con:
-        ultima = con.execute(
-            "SELECT max(terminado_em) AS t FROM meta.execucao_ingestao WHERE estado IN ('concluido','inalterado')"
-        ).fetchone()["t"]
-        cobertura = con.execute("SELECT fonte, ano, estado, n_registos, atualizado_em FROM meta.cobertura ORDER BY ano").fetchall()
+        sinc = con.execute(
+            "SELECT id, iniciado_em, terminado_em, estado FROM meta.sincronizacao "
+            "WHERE estado IN ('concluido','parcial') ORDER BY id DESC LIMIT 1").fetchone()
+        ultima_alteracao = con.execute(
+            "SELECT max(terminado_em) AS t FROM meta.execucao_ingestao "
+            "WHERE estado = 'concluido' AND (inseridos > 0 OR atualizados > 0)").fetchone()["t"]
+        cobertura = con.execute(
+            "SELECT fonte, ano, estado, n_registos, versao_fonte, atualizado_em FROM meta.cobertura ORDER BY ano"
+        ).fetchall()
     return {
-        "ultima_atualizacao": ultima,
+        "ultima_verificacao": sinc["terminado_em"] if sinc else None,
+        "estado_ultima_verificacao": sinc["estado"] if sinc else None,
+        "ultima_atualizacao": ultima_alteracao,
         "cobertura": cobertura,
         "procedimentos": {k: v["rotulo"] for k, v in PROCEDIMENTOS.items()},
         "indicadores": [
@@ -66,26 +87,54 @@ def meta():
 
 @app.get("/api/qualidade")
 def qualidade():
-    """Relatório de qualidade de dados agregado por execução e tipo de problema."""
+    """Relatório de qualidade de dados: por ano (última carga), completude e histórico de execuções."""
     with bd.ligar() as con:
-        execucoes = con.execute("SELECT * FROM meta.execucao_ingestao ORDER BY id DESC LIMIT 20").fetchall()
+        cobertura = con.execute(
+            """
+            SELECT c.ano, c.estado, c.n_registos, c.versao_fonte, c.atualizado_em,
+                   e.lidos, e.inseridos, e.atualizados, e.inalterados, e.rejeitados, e.terminado_em
+            FROM meta.cobertura c LEFT JOIN meta.execucao_ingestao e ON e.id = c.execucao_id
+            WHERE c.fonte = 'base_contratos' ORDER BY c.ano DESC
+            """).fetchall()
+        # problemas da execução mais recente que CARREGOU cada ano (a que está em vigor)
         problemas = con.execute(
             """
-            SELECT p.execucao_id, p.gravidade,
-                   regexp_replace(p.descricao, ':.*$', '') AS tipo, count(*) AS n
-            FROM meta.problema_qualidade p
-            GROUP BY 1,2,3 ORDER BY 1 DESC, n DESC
+            WITH ult AS (
+                SELECT DISTINCT ON (ano) id, ano FROM meta.execucao_ingestao
+                WHERE estado = 'concluido' AND lidos > 0 ORDER BY ano, id DESC)
+            SELECT u.ano, r.gravidade, r.tipo, r.n, r.exemplos
+            FROM ult u JOIN meta.resumo_qualidade r ON r.execucao_id = u.id
+            ORDER BY u.ano DESC, r.gravidade DESC, r.n DESC
+            """).fetchall()
+        completude = con.execute(
             """
-        ).fetchall()
-    return {"execucoes": execucoes, "problemas": problemas}
+            SELECT ano, count(*) AS n,
+                   round(100.0 * count(*) FILTER (WHERE data_celebracao IS NULL) / count(*), 1) AS pct_sem_data_celebracao,
+                   round(100.0 * count(*) FILTER (WHERE preco_contratual IS NULL OR preco_contratual <= 0) / count(*), 1) AS pct_sem_preco,
+                   round(100.0 * count(*) FILTER (WHERE cpv IS NULL) / count(*), 1) AS pct_sem_cpv,
+                   round(100.0 * count(*) FILTER (WHERE distrito IS NULL) / count(*), 1) AS pct_sem_distrito,
+                   round(100.0 * count(*) FILTER (WHERE n_concorrentes IS NULL AND procedimento IN
+                        (SELECT unnest(%(comp)s::text[]))) / nullif(count(*) FILTER (WHERE procedimento IN
+                        (SELECT unnest(%(comp)s::text[]))), 0), 1) AS pct_concorrentes_desconhecidos_concorrenciais,
+                   count(*) FILTER (WHERE removido_da_fonte_em IS NOT NULL) AS removidos_da_fonte
+            FROM contrato GROUP BY ano ORDER BY ano DESC
+            """, {"comp": [k for k, v in PROCEDIMENTOS.items() if v["competitivo"]]}).fetchall()
+        sincronizacoes = con.execute(
+            "SELECT id, iniciado_em, terminado_em, estado, plano, resumo->'falhas' AS falhas, "
+            "resumo->'adiados' AS adiados, erro FROM meta.sincronizacao ORDER BY id DESC LIMIT 15").fetchall()
+        execucoes = con.execute(
+            "SELECT id, ano, estado, iniciado_em, terminado_em, lidos, inseridos, atualizados, inalterados, "
+            "rejeitados, erro FROM meta.execucao_ingestao ORDER BY id DESC LIMIT 30").fetchall()
+    return {"cobertura": cobertura, "problemas": problemas, "completude": completude,
+            "sincronizacoes": sincronizacoes, "execucoes": execucoes}
 
 
 def _filtros(papel, de, ate, distrito, procedimento, cpv, valor_min, valor_max):
     cond, par = ["TRUE"], {}
     if de:
-        cond.append("k.data_celebracao >= %(de)s"); par["de"] = de
+        cond.append("k.data_referencia >= %(de)s"); par["de"] = de
     if ate:
-        cond.append("k.data_celebracao <= %(ate)s"); par["ate"] = ate
+        cond.append("k.data_referencia <= %(ate)s"); par["ate"] = ate
     if distrito:
         cond.append("k.distrito = %(distrito)s"); par["distrito"] = distrito
     if procedimento:
@@ -252,14 +301,14 @@ def contratos(
     with bd.ligar() as con:
         linhas = con.execute(
             f"""
-            SELECT k.id, k.id_origem, k.objeto, k.procedimento, k.data_celebracao, k.preco_contratual,
+            SELECT k.id, k.id_origem, k.objeto, k.procedimento, k.data_celebracao, k.data_publicacao, k.removido_da_fonte_em, k.preco_contratual,
                    k.n_concorrentes, k.distrito, k.url_fonte, a.nome AS adjudicante,
                    (SELECT json_agg(json_build_object('indicador', r.indicador, 'pontos', r.pontos,
                            'explicacao', r.explicacao)) FROM avaliacao_risco r
                     WHERE r.contrato_id = k.id AND r.estado='sinal') AS sinais
             FROM contrato k JOIN entidade a ON a.id = k.adjudicante_id
             WHERE {' AND '.join(cond)}
-            ORDER BY k.data_celebracao DESC NULLS LAST LIMIT %(lim)s OFFSET %(off)s
+            ORDER BY k.data_referencia DESC NULLS LAST LIMIT %(lim)s OFFSET %(off)s
             """,
             par,
         ).fetchall()

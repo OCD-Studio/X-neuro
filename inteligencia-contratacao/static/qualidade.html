@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="pt-PT">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Qualidade dos dados</title>
+<style>
+  :root { --bg:#fafaf9; --fg:#1c1917; --mut:#78716c; --linha:#e7e5e4; --acento:#b45309; --cartao:#fff; --ok:#15803d; --mau:#b91c1c; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#1c1917; --fg:#f5f5f4; --mut:#a8a29e; --linha:#44403c; --acento:#f59e0b; --cartao:#292524; --ok:#4ade80; --mau:#f87171; } }
+  * { box-sizing:border-box; }
+  body { margin:0 auto; max-width:1100px; padding:16px; font:14px/1.5 system-ui, sans-serif; background:var(--bg); color:var(--fg); }
+  h1 { font-size:22px; margin:8px 0; } h2 { font-size:16px; margin-top:28px; }
+  a { color:var(--acento); } .mut { color:var(--mut); font-size:13px; }
+  .tabela { overflow-x:auto; }
+  table { border-collapse:collapse; width:100%; background:var(--cartao); font-size:13px; }
+  th, td { padding:5px 8px; border-bottom:1px solid var(--linha); text-align:left; vertical-align:top; }
+  th { color:var(--mut); font-weight:600; }
+  td.num { text-align:right; font-variant-numeric:tabular-nums; white-space:nowrap; }
+  .ingerido, .concluido { color:var(--ok); } .falhou { color:var(--mau); } .pendente, .parcial, .a_correr { color:var(--acento); }
+  .barra { display:flex; gap:2px; margin:8px 0; flex-wrap:wrap; }
+  .barra span { flex:1; min-width:44px; text-align:center; padding:6px 0; border-radius:4px; font-size:12px; background:var(--linha); }
+  .barra span.ingerido { background:var(--ok); color:var(--bg); }
+  .barra span.falhou { background:var(--mau); color:var(--bg); }
+  details { margin:6px 0; } summary { cursor:pointer; }
+</style>
+</head>
+<body>
+<p><a href="/">← Lista</a> · <a href="/metodologia">Metodologia e limites</a></p>
+<h1>Qualidade dos dados</h1>
+<p class="mut">Tudo o que falta ou está inconsistente na fonte fica registado aqui. Nada é corrigido por estimativa.
+Fonte: Portal BASE (IMPIC) via dados.gov.pt, republicada semanalmente; verificada diariamente.</p>
+<p id="estado" class="mut">a carregar…</p>
+
+<h2>Cobertura histórica</h2>
+<div class="barra" id="barra"></div>
+<div class="tabela"><table id="t-cob"></table></div>
+
+<h2>Completude por ano</h2>
+<p class="mut">Percentagem de contratos sem o campo. “Concorrentes desconhecidos” conta apenas procedimentos concorrenciais
+(onde a lista de concorrentes devia existir) — esses contratos ficam como “dados insuficientes” no indicador de concorrente único.</p>
+<div class="tabela"><table id="t-comp"></table></div>
+
+<h2>Problemas registados na última carga de cada ano</h2>
+<div id="problemas"></div>
+
+<h2>Notas conhecidas sobre a fonte</h2>
+<ul>
+  <li>2020–2021: ajustes diretos simplificados ao abrigo do regime excecional COVID (DL 10-A/2020) não têm data de celebração;
+  usa-se a data de publicação como data de referência.</li>
+  <li>A consulta prévia só existe a partir de 2018 (revisão do Código dos Contratos Públicos); antes, a maioria dos contratos registados são ajustes diretos.</li>
+  <li>Até 2017 a lista de concorrentes está vazia em cerca de 3 em cada 4 contratos.</li>
+  <li>Alguns adjudicatários (sobretudo pessoas singulares e empresas estrangeiras) são publicados sem NIF.</li>
+</ul>
+
+<h2>Execuções recentes</h2>
+<div class="tabela"><table id="t-sinc"></table></div>
+
+<script>
+const nf = new Intl.NumberFormat('pt-PT');
+const dt = s => s ? new Date(s).toLocaleString('pt-PT') : '—';
+function tabela(id, cab, linhas) {
+  const t = document.getElementById(id); t.innerHTML = '';
+  const h = t.createTHead().insertRow(); cab.forEach(c => { const th = document.createElement('th'); th.textContent = c; h.append(th); });
+  const b = t.createTBody();
+  for (const l of linhas) { const tr = b.insertRow(); l.forEach(([v, cls]) => { const td = tr.insertCell(); td.textContent = v ?? '—'; if (cls) td.className = cls; }); }
+}
+fetch('/api/qualidade').then(r => r.json()).then(q => {
+  const ult = q.sincronizacoes[0];
+  document.getElementById('estado').textContent = ult
+    ? `Última verificação: ${dt(ult.terminado_em || ult.iniciado_em)} (${ult.estado})` : 'Ainda sem verificações.';
+  const barra = document.getElementById('barra');
+  for (const c of [...q.cobertura].reverse()) { const s = document.createElement('span'); s.className = c.estado; s.textContent = c.ano; s.title = c.estado; barra.append(s); }
+  tabela('t-cob', ['Ano', 'Estado', 'Contratos', 'Versão da fonte', 'Última carga', 'Lidos', 'Novos', 'Alterados', 'Rejeitados'],
+    q.cobertura.map(c => [[c.ano], [c.estado, c.estado], [c.n_registos != null ? nf.format(c.n_registos) : null, 'num'],
+      [dt(c.versao_fonte)], [dt(c.terminado_em)], [c.lidos != null ? nf.format(c.lidos) : null, 'num'],
+      [c.inseridos != null ? nf.format(c.inseridos) : null, 'num'], [c.atualizados != null ? nf.format(c.atualizados) : null, 'num'],
+      [c.rejeitados != null ? nf.format(c.rejeitados) : null, 'num']]));
+  const pct = v => [v == null ? '—' : v + '%', 'num'];
+  tabela('t-comp', ['Ano', 'Contratos', 'Sem data celebração', 'Sem preço', 'Sem CPV', 'Sem distrito', 'Concorrentes desconhecidos', 'Removidos da fonte'],
+    q.completude.map(c => [[c.ano], [nf.format(c.n), 'num'], pct(c.pct_sem_data_celebracao), pct(c.pct_sem_preco), pct(c.pct_sem_cpv),
+      pct(c.pct_sem_distrito), pct(c.pct_concorrentes_desconhecidos_concorrenciais), [nf.format(c.removidos_da_fonte), 'num']]));
+  const porAno = {};
+  for (const p of q.problemas) (porAno[p.ano] ??= []).push(p);
+  const div = document.getElementById('problemas');
+  for (const ano of Object.keys(porAno).sort().reverse()) {
+    const d = document.createElement('details'); const s = document.createElement('summary');
+    const rej = porAno[ano].filter(p => p.gravidade === 'rejeitado').reduce((a, p) => a + p.n, 0);
+    s.textContent = `${ano} — ${porAno[ano].length} tipos de problema, ${nf.format(rej)} registos rejeitados`;
+    d.append(s);
+    const t = document.createElement('table');
+    t.innerHTML = '<tr><th>Gravidade</th><th>Tipo</th><th>Ocorrências</th><th>Exemplos (idcontrato no BASE)</th></tr>';
+    for (const p of porAno[ano]) {
+      const tr = t.insertRow();
+      [p.gravidade, p.tipo, nf.format(p.n)].forEach((v, i) => { const td = tr.insertCell(); td.textContent = v; if (i === 2) td.className = 'num'; });
+      const td = tr.insertCell();
+      p.exemplos.forEach((id, i) => { const a = document.createElement('a'); a.href = 'https://www.base.gov.pt/Base4/pt/detalhe/?type=contratos&id=' + encodeURIComponent(id); a.textContent = id; a.target = '_blank'; a.rel = 'noopener'; if (i) td.append(', '); td.append(a); });
+    }
+    d.append(t); div.append(d);
+  }
+  tabela('t-sinc', ['#', 'Início', 'Fim', 'Estado', 'Anos processados', 'Falhas', 'Adiados'],
+    q.sincronizacoes.map(s => [[s.id], [dt(s.iniciado_em)], [dt(s.terminado_em)], [s.estado, s.estado],
+      [s.plano ? [...s.plano.atualizar, ...s.plano.backfill].join(', ') || 'nenhum (sem alterações)' : '—'],
+      [(s.falhas || []).join(', ') || '—'], [(s.adiados || []).join(', ') || '—']]));
+});
+</script>
+</body>
+</html>

@@ -49,6 +49,12 @@ totalmente legais. Cada score é a soma transparente de sinais, e cada sinal mos
   <li>O dataset OCDS do Portal BASE em dados.gov.pt <strong>não é usado</strong>: está desatualizado desde 2022.</li>
 </ul>
 
+<h2>Atualização</h2>
+<p>Todos os dias às 06:17 (hora de Lisboa) o sistema verifica se a fonte republicou algum ano (pela assinatura sha1 de cada ficheiro)
+e carrega apenas o que mudou. Anos ainda não carregados entram progressivamente (do mais recente para o mais antigo).
+Contratos que desaparecem da fonte numa republicação ficam marcados, não são apagados. O topo da lista mostra a hora da última
+verificação, a última alteração de dados e a cobertura histórica; o detalhe está em <a href="/qualidade">Qualidade dos dados</a>.</p>
+
 <h2>Limites conhecidos dos dados</h2>
 <ul>
   <li><strong>Concorrentes:</strong> a lista de concorrentes está vazia em parte dos procedimentos concorrenciais
@@ -56,7 +62,9 @@ totalmente legais. Cada score é a soma transparente de sinais, e cada sinal mos
   <li><strong>Adjudicatários sem NIF:</strong> a fonte omite o NIF de alguns adjudicatários (sobretudo pessoas singulares e empresas estrangeiras).
   São identificados apenas pelo nome, com a marca “sem NIF na fonte”; homónimos podem ser fundidos ou separados incorretamente.</li>
   <li><strong>Vários adjudicatários:</strong> o valor total de um contrato conta para cada adjudicatário (não é repartido).</li>
-  <li>Registos repetidos, preços nulos e datas em falta ficam no relatório de qualidade de dados (<a href="/api/qualidade">/api/qualidade</a>), nunca são corrigidos por estimativa.</li>
+  <li>Registos repetidos, preços nulos e datas em falta ficam no relatório de <a href="/qualidade">qualidade dos dados</a>, nunca são corrigidos por estimativa.</li>
+  <li><strong>Datas:</strong> o período de um contrato usa a data de celebração; quando a fonte não a tem (p.ex. ajustes diretos do regime COVID em 2020), usa a data de publicação.</li>
+  <li><strong>Anos antigos:</strong> até 2017 a lista de concorrentes falta em cerca de 3 em cada 4 contratos e quase não há procedimentos concorrenciais registados além do concurso público; comparações com anos recentes devem ter isso em conta.</li>
 </ul>
 
 <h2>Relações e pessoas</h2>

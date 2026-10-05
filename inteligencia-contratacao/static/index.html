@@ -36,6 +36,7 @@
 <header>
   <h1>Sinais de risco na contratação pública</h1>
   <span class="meta" id="meta">a carregar…</span>
+  <a href="/qualidade">Qualidade dos dados</a>
   <a href="/metodologia">Metodologia e limites</a>
 </header>
 <p class="aviso">O <strong>score (0–100)</strong> compara cada entidade com o que seria de esperar no mesmo tipo de procedimento, setor e ano — não depende do número de contratos.
@@ -128,10 +129,16 @@ document.getElementById('csv').onclick = () => { const p = params(); p.set('form
 
 (async () => {
   const m = await (await fetch('/api/meta')).json();
-  const anos = m.cobertura.filter(c => c.estado === 'ingerido').map(c => c.ano);
+  const anos = m.cobertura.filter(c => c.estado === 'ingerido').map(c => c.ano).sort();
+  const total = m.cobertura.length;
+  const dtf = s => s ? new Date(s).toLocaleString('pt-PT') : '—';
+  // intervalos contínuos de anos: "2012–2026"
+  const intervalos = [];
+  for (const a of anos) { const u = intervalos.at(-1); if (u && a === u[1] + 1) u[1] = a; else intervalos.push([a, a]); }
+  const cob = intervalos.map(([a, b]) => a === b ? a : `${a}–${b}`).join(', ');
   document.getElementById('meta').textContent =
-    `Última atualização: ${m.ultima_atualizacao ? new Date(m.ultima_atualizacao).toLocaleString('pt-PT') : '—'} · ` +
-    `Cobertura histórica: ${anos.length ? anos.join(', ') : 'nenhuma'}`;
+    `Verificado: ${dtf(m.ultima_verificacao)} · Dados alterados: ${dtf(m.ultima_atualizacao)} · ` +
+    `Cobertura histórica: ${cob || 'nenhuma'} (${anos.length}/${total} anos)`;
   const sp = f.procedimento;
   for (const [k, v] of Object.entries(m.procedimentos)) sp.add(new Option(v, k));
   const ds = await (await fetch('/api/distritos')).json();
