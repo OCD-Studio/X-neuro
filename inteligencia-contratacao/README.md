@@ -13,6 +13,7 @@ Sistema que ingere os contratos públicos portugueses, calcula **indicadores de 
 |---|---|
 | 0 — Reconhecimento | ✅ (ver "Achados da Fase 0") |
 | 1 — Skeleton: 1 ano, BD, 1 indicador, teste, lista básica | ✅ 2025 ingerido; indicador *concorrente único* |
+| 1b — Calibração do score (antecipada a pedido) | ✅ taxas de referência + score 0–100 por entidade |
 | 2 — Ingestão completa, scheduler diário, backfill, qualidade | ⏳ |
 | 3 — Todos os indicadores + lista completa | ⏳ |
 | 4 — Resolução de entidades + grafo temporal + perfis de entidade | ⏳ |
@@ -65,7 +66,19 @@ se a performance o justificar.
 
 | Código | Pontos | Regra |
 |---|---|---|
-| `concorrente_unico` | 10 | Procedimento concorrencial com exatamente 1 concorrente na fonte. Ajuste direto, acordo-quadro, contratação excluída → não aplicável. Lista de concorrentes vazia → dados insuficientes (não pontua). |
+| `concorrente_unico` | 10 (base) | Procedimento concorrencial com exatamente 1 concorrente na fonte. Ajuste direto, acordo-quadro, contratação excluída → não aplicável. Lista de concorrentes vazia → dados insuficientes (não pontua). |
+
+### Calibração (`contratacao/calibracao.py`)
+
+- **Taxa de referência** por indicador e grupo comparável: (ano, procedimento, divisão CPV) → (ano, procedimento) →
+  (procedimento); usa-se o primeiro grupo com ≥ 30 contratos avaliáveis. Guardadas em `referencia_risco`.
+- **Pontos por contrato** = base × (1 − taxa). Ex. 2025: concurso público ≈ 9, consulta prévia ≈ 5.
+- **Score de entidade (0–100)** por indicador: `100 × (L − p_esp) / (1 − p_esp)`, com `p_esp` = esperados/avaliáveis e
+  `L` = limite inferior de Wilson (95 %) da taxa observada; 0 se `L ≤ p_esp` ou < 5 contratos avaliáveis.
+  Independente da dimensão e penaliza amostras pequenas. Média dos indicadores ativos = score da entidade.
+  A fórmula existe em Python (explicação, `/api/entidades/{id}/risco`) e em SQL (lista); um teste garante que coincidem.
+- Efeito em 2025: a MEO (93 sinais vs 90,9 esperados) passa de 1.º lugar a score 0; no topo ficam entidades com
+  taxas muito acima do esperado e amostra suficiente (ex.: 37/37 com 37 % esperado → 89).
 
 ## Achados da Fase 0 (2026-10-05)
 
@@ -88,9 +101,8 @@ Há também datasets de **Anúncios** (2012–2026) e **Modificações contratua
   `adjudicatarioPMEs`, `tipoFimContrato`, `linkPecasProc`…
 
 **Resultado do 1.º indicador em 2025:** 19 334 sinais; 22 505 dados insuficientes. Taxa de concorrente único:
-concurso público 12,6 %, consulta prévia 47,1 %. → Na Fase 3 é preciso **calibrar**: a taxa de base da consulta
-prévia é muito alta, e o score absoluto favorece fornecedores grandes (mais contratos = mais sinais). Proposta:
-scores relativos (taxa da entidade vs. taxa de referência do procedimento/CPV), como no CRI.
+concurso público 12,6 %, consulta prévia 47,1 %. A soma simples de pontos favorecia fornecedores grandes →
+**calibrado** (ver secção Calibração).
 
 **Reaproveitado de [mopanc/gov-analytics](https://github.com/mopanc/gov-analytics) (MIT):** conhecimento do formato
 (campos, "NIF - Nome", datas, CPV, local) e o padrão de execução de ingestão por checksum. Código não reaproveitado

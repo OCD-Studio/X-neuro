@@ -26,6 +26,22 @@ totalmente legais. Cada score é a soma transparente de sinais, e cada sinal mos
 <h2>Indicadores ativos</h2>
 <div id="indicadores" class="mut">a carregar…</div>
 
+<h2>Como se calcula o score</h2>
+<ol>
+  <li><strong>Por contrato:</strong> cada indicador devolve “sinal”, “sem sinal”, “não aplicável” ou “dados insuficientes”.
+  Só “sinal” dá pontos; dados em falta nunca contam como sinal.</li>
+  <li><strong>Taxa de referência:</strong> para cada indicador calcula-se a percentagem de sinais entre contratos comparáveis
+  — mesmo tipo de procedimento, mesma divisão CPV (setor) e mesmo ano. Se o grupo tiver menos de 30 contratos, usa-se um grupo mais largo
+  (procedimento e ano; depois só procedimento).</li>
+  <li><strong>Pontos de um contrato</strong> = pontos base × (1 − taxa de referência). Um sinal raro no seu grupo pesa mais do que um sinal comum.
+  Ex.: concorrente único num concurso público (≈13 % dos casos) vale 9; numa consulta prévia (≈47 %) vale 5.</li>
+  <li><strong>Score de uma entidade (0–100)</strong>, por indicador: compara a taxa observada nos seus contratos com a taxa esperada para esse
+  conjunto de contratos. Usa-se o limite inferior do intervalo de confiança a 95 % (Wilson), para que poucas observações não gerem scores extremos:
+  6 sinais em 6 contratos pesa menos do que 37 em 37. São precisos pelo menos 5 contratos avaliáveis; abaixo disso o score é 0 e a app diz porquê.
+  O score não cresce com a dimensão da entidade: um fornecedor com muitos contratos mas em linha com o esperado tem score 0.</li>
+  <li>Com vários indicadores, o score da entidade será a média dos scores por indicador.</li>
+</ol>
+
 <h2>Fontes</h2>
 <ul>
   <li><strong>Portal BASE / IMPIC</strong>, via dados.gov.pt — dataset “Contratos Públicos – Portal Base – IMPIC – Contratos de 2012 a 2026”,

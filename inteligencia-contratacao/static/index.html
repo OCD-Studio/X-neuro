@@ -26,6 +26,10 @@
   td.nome { white-space:normal; min-width:220px; }
   .tag { font-size:11px; color:var(--mut); }
   a { color:var(--acento); }
+  tbody tr { cursor:pointer; }
+  tbody tr:hover { background:var(--bg); }
+  tr.detalhe td { white-space:normal; font-size:13px; background:var(--bg); cursor:default; }
+  .detalhe ul { margin:4px 0; padding-left:18px; }
 </style>
 </head>
 <body>
@@ -34,7 +38,8 @@
   <span class="meta" id="meta">a carregar…</span>
   <a href="/metodologia">Metodologia e limites</a>
 </header>
-<p class="aviso">Esta lista mostra <strong>indicadores de risco</strong> calculados a partir de dados públicos (Portal BASE).
+<p class="aviso">O <strong>score (0–100)</strong> compara cada entidade com o que seria de esperar no mesmo tipo de procedimento, setor e ano — não depende do número de contratos.
+Clique numa linha para ver a explicação. Esta lista mostra <strong>indicadores de risco</strong> calculados a partir de dados públicos (Portal BASE).
 Um sinal <strong>não é prova nem acusação</strong>: pode ter justificação legal. Serve apenas como pista para investigação humana.</p>
 
 <form id="filtros">
@@ -60,8 +65,8 @@ Um sinal <strong>não é prova nem acusação</strong>: pode ter justificação 
     <th data-o="total" class="ativo">Total (€) ▼</th>
     <th data-o="valor_medio">Valor médio (€)</th>
     <th data-o="pct_ajuste_direto">% ajuste direto</th>
-    <th data-o="n_sinais">Nº sinais</th>
-    <th data-o="score">Score de risco</th>
+    <th data-o="n_sinais">Sinais / esperado</th>
+    <th data-o="score">Score de risco (0–100)</th>
   </tr></thead>
   <tbody id="corpo"></tbody>
 </table>
@@ -89,12 +94,27 @@ async function carregar() {
     const id = e.identificado_por === 'nif' ? 'NIF ' + e.nif : 'sem NIF na fonte';
     tr.innerHTML = `<td class="nome"></td><td class="num">${e.n_contratos}</td><td class="num">${eur.format(e.total)}</td>
       <td class="num">${eur.format(e.valor_medio)}</td><td class="num">${e.pct_ajuste_direto}%</td>
-      <td class="num">${e.n_sinais}</td><td class="num">${e.score}</td>`;
+      <td class="num">${e.n_sinais} / ${Number(e.esperados).toFixed(1)}</td><td class="num"><strong>${e.score}</strong></td>`;
+    tr.onclick = () => detalhe(tr, e.id);
     tr.cells[0].textContent = e.nome;
     const t = document.createElement('div'); t.className = 'tag'; t.textContent = id; tr.cells[0].append(t);
     corpo.append(tr);
   }
   if (!corpo.children.length) corpo.innerHTML = '<tr><td colspan="7">Sem resultados.</td></tr>';
+}
+async function detalhe(tr, id) {
+  const aberto = tr.nextElementSibling;
+  if (aberto && aberto.classList.contains('detalhe')) { aberto.remove(); return; }
+  const d = await (await fetch(`/api/entidades/${id}/risco?papel=${f.papel.value}`)).json();
+  const linha = document.createElement('tr'); linha.className = 'detalhe';
+  const td = linha.insertCell(); td.colSpan = 7;
+  const t = document.createElement('div');
+  t.textContent = `Porquê este score (${d.score}/100)? Comparação com a taxa de referência do mesmo tipo de procedimento, setor (CPV) e ano. Indicador de risco, não prova.`;
+  const ul = document.createElement('ul');
+  for (const i of d.indicadores) { const li = document.createElement('li'); li.textContent = `${i.nome}: ${i.score}/100 — ${i.explicacao}`; ul.append(li); }
+  const a = document.createElement('a'); a.href = `/api/contratos?entidade_id=${id}&sinal=concorrente_unico`; a.textContent = 'Ver contratos com sinal (JSON)';
+  td.append(t, ul, a);
+  tr.after(linha);
 }
 document.querySelectorAll('th[data-o]').forEach(th => th.onclick = () => {
   if (!th.dataset.o) return;
