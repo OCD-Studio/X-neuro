@@ -15,12 +15,17 @@ Sistema que ingere os contratos públicos portugueses, calcula **indicadores de 
 | 1 — Skeleton: 1 ano, BD, 1 indicador, teste, lista básica | ✅ 2025 ingerido; indicador *concorrente único* |
 | 1b — Calibração do score (antecipada a pedido) | ✅ taxas de referência + score 0–100 por entidade |
 | 2 — Ingestão completa, scheduler diário, backfill, qualidade | ✅ 2012–2026; sincronização diária; página `/qualidade` |
-| 3 — Todos os indicadores + lista completa | ⏳ |
+| 3 — Todos os indicadores + lista completa | ✅ 12 indicadores testados; lista < 1 s; minimização de pessoas singulares |
 | 4 — Resolução de entidades + grafo temporal + perfis de entidade | ⏳ |
 | 5 — Perfis de pessoa + organigrama | ⏳ |
 | 6 — Alertas + polish | ⏳ |
 
 ## Arranque rápido
+
+### Alojamento partilhado (cPanel / Krystal)
+
+Ver [`docs/INSTALAR_KRYSTAL.md`](docs/INSTALAR_KRYSTAL.md) — `passenger_wsgi.py`, `.env`, Cron Job diário e
+`python -m contratacao.cli verificar` para confirmar os requisitos (PostgreSQL ≥ 12, permissões, rede, disco).
 
 ### Produção (Docker)
 
@@ -30,8 +35,8 @@ docker compose up -d          # db + web (porta 8000, só localhost) + agendador
 ```
 
 O agendador corre a sincronização ao arrancar e todos os dias às 06:17 (Europe/Lisbon). Pôr um reverse proxy com
-HTTPS (Caddy/nginx) à frente da porta 8000. Requisitos: ~10 GB de disco para a BD com 2012–2026; ~300 MB de RAM
-para a ingestão (lê em streaming).
+HTTPS (Caddy/nginx) à frente da porta 8000. Requisitos: ~9 GB de disco para a BD com 2012–2026; ~200 MB de RAM
+(ingestão e pontuação em streaming).
 
 ### Desenvolvimento
 
@@ -88,9 +93,34 @@ simplificados de 2020 ao abrigo do regime COVID, DL 10-A/2020, sem data de celeb
 
 ## Indicadores
 
-| Código | Pontos | Regra |
-|---|---|---|
-| `concorrente_unico` | 10 (base) | Procedimento concorrencial com exatamente 1 concorrente na fonte. Ajuste direto, acordo-quadro, contratação excluída → não aplicável. Lista de concorrentes vazia → dados insuficientes (não pontua). |
+| Código | Tipo | Regra (resumo) | 2012–2026: sinais / avaliáveis |
+|---|---|---|---|
+| `concorrente_unico` | contrato | procedimento concorrencial com 1 concorrente | 127 431 / 446 151 (28,6 %) |
+| `preco_acima_base` | contrato | preço contratual > preço base (+1 €) | 1 305 / 2,1 M (0,1 %) |
+| `derrapagem_execucao` | contrato | preço efetivo ≥ 120 % do contratual | 14 845 / 792 970 (1,9 %) |
+| `ajuste_direto_acima_limiar` | contrato | ajuste direto fundamentado no valor ≥ limiar da própria base legal | 6 772 / 747 858 (0,9 %) |
+| `valor_logo_abaixo_limiar` | contrato | idem, entre 90 % e 100 % do limiar | 67 059 / 747 858 (9,0 %) |
+| `publicacao_tardia` | contrato | publicado > 90 dias após celebração | 399 874 / 2,2 M (18 %) |
+| `timing_eleitoral` | contrato | autarquia, 60 dias antes das autárquicas (só anos eleitorais) | 36 007 / 178 113 (20 %) |
+| `ajuste_direto_repetido` | conjunto | mesmo adjudicante+fornecedor+base legal+CPV2, acumulado em 3 anos ≥ limiar (CCP art. 113.º) | 80 016 / 747 806 (10,7 %) |
+| `fracionamento` | conjunto | ajustes diretos ao mesmo fornecedor, mesmo CPV3, ±30 dias, cada um < limiar e soma ≥ limiar | 12 934 / 741 034 (1,7 %) |
+| `concentracao` | conjunto | fornecedor com ≥ 50 % do valor da entidade no setor/ano (≥ 5 contratos) | 70 157 / 1,8 M (3,9 %) |
+| `fornecedor_estreante` | conjunto | contrato ≥ 100 000 € é o 1.º do fornecedor no BASE (desde 2014) | 2 727 / 183 085 (1,5 %) |
+| `prazo_curto` | conjunto | prazo de propostas (com prorrogações) < percentil 10 de comparáveis | 8 257 / 225 087 (3,7 %) |
+
+**Bloqueados por falta de fonte** (registo comercial): empresas recém-criadas (substituído por `fornecedor_estreante`)
+e ligações societárias entre fornecedores. Descrições, limites e parâmetros de cada um: `contratacao/regras/` e
+página `/metodologia`.
+
+**Limiares legais (a validar juridicamente):** a base legal vem do campo `fundamentacao` de cada contrato (sql/005):
+art. 19.º a)/20.º n.º 1 a) do CCP 2008 (150 000 € / 75 000 €) e art. 19.º d)/20.º n.º 1 d) do CCP 2017 (30 000 € / 20 000 €).
+O campo `CritMateriais` da fonte **não** é usado: há milhares de contratos marcados "Não" que invocam o art. 24.º
+(critérios materiais) — usá-lo gerava 53 mil falsos "ajustes diretos acima do limiar" (contra 6 772 com a base legal).
+
+### Score da entidade
+
+Média dos scores por indicador (0–100, ver calibração) nos indicadores com ≥ 5 contratos avaliáveis.
+Níveis de triagem: alto 50–100, médio 20–49, baixo 0–19.
 
 ### Calibração (`contratacao/calibracao.py`)
 
@@ -145,8 +175,19 @@ RCBE restrito desde o acórdão TJUE de 2022) → maior risco para pessoas/grafo
   com o registo `meta.migracao`); os restantes continuaram e a execução seguinte recuperou-o sozinha.
 - 103 501 entidades (quase metade) estão identificadas só por nome, porque a fonte omite o NIF — sobretudo
   pessoas singulares. Relevante para a resolução de entidades (Fase 4).
-- **Pendente para a Fase 3:** a lista sem filtros sobre o histórico completo demora ~7 s (com filtro de um ano ~2 s).
-  Solução prevista: tabela de agregados por entidade/ano/procedimento/distrito/CPV, atualizada na sincronização.
+- ~~Pendente: lista lenta (~7 s)~~ → resolvido na Fase 3.
+
+## Resultado da Fase 3 (2026-10-05)
+
+- 12 indicadores, 144 testes (casos conhecidos por indicador; equivalência SQL ↔ Python do score e da calibração).
+- Pontuação completa: ~6 min, **~100 MB de RAM** (antes 3,5 GB), resultados em ~1,5 GB (antes 5,2 GB); construída
+  num schema auxiliar e trocada atomicamente.
+- Lista: histórico completo ~0,5 s (resumo pré-calculado), um ano ~0,7 s, filtros finos (distrito, procedimento,
+  CPV, valor, datas arbitrárias) 1–2,5 s.
+- Nova fonte: anúncios de procedimento (2012–2026), para o indicador de prazos.
+- **Minimização de dados pessoais:** 89 mil fornecedores que parecem pessoas singulares (sem NIF na fonte e sem forma
+  jurídica no nome, ou NIF de herança/empresário individual) não são listados nem perfilados (sql/010).
+- Anomalias da fonte registadas sem correção: p.ex. anúncio de 2020 com preço base de 34 000 000 000 000 000 €.
 
 ## Privacidade e RGPD
 
