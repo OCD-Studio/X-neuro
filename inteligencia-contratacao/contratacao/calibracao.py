@@ -93,10 +93,13 @@ def _descrever(nivel: str, chave: tuple, n: int) -> str:
 
 
 def pontos_calibrados(pontos_base: int, taxa: float | None) -> int:
-    """Pontos de um contrato com sinal. Sem referência -> pontos base (sem calibração)."""
+    """Pontos de um contrato com sinal. Sem referência -> pontos base (sem calibração).
+
+    Arredondamento "meio para cima" (igual ao SQL floor(x + 0.5)), não o arredondamento bancário do Python.
+    """
     if taxa is None:
         return pontos_base
-    return round(pontos_base * (1 - taxa))
+    return math.floor(pontos_base * (1 - taxa) + 0.5)
 
 
 def wilson_inferior(sucessos: int, n: int, z: float = Z_CONFIANCA) -> float:
