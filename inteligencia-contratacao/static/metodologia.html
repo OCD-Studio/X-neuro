@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="pt-PT">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Metodologia e limites</title>
+<style>
+  :root { --bg:#fafaf9; --fg:#1c1917; --mut:#78716c; --linha:#e7e5e4; --acento:#b45309; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#1c1917; --fg:#f5f5f4; --mut:#a8a29e; --linha:#44403c; --acento:#f59e0b; } }
+  body { margin:0 auto; max-width:760px; padding:16px; font:15px/1.55 system-ui, sans-serif; background:var(--bg); color:var(--fg); }
+  h1 { font-size:22px; } h2 { font-size:17px; margin-top:28px; border-top:1px solid var(--linha); padding-top:16px; }
+  a { color:var(--acento); } .mut { color:var(--mut); font-size:13px; }
+  table { border-collapse:collapse; width:100%; font-size:14px; } td, th { border-bottom:1px solid var(--linha); padding:6px; text-align:left; vertical-align:top; }
+</style>
+</head>
+<body>
+<p><a href="/">← Lista</a></p>
+<h1>Metodologia e limites</h1>
+
+<h2>O que este sistema é — e o que não é</h2>
+<p>É uma ferramenta de <strong>triagem</strong>: calcula <strong>indicadores de risco</strong> sobre contratos públicos e mostra
+<strong>relações registadas</strong> entre entidades, para orientar investigação humana (jornalismo, Tribunal de Contas, Ministério Público).</p>
+<p><strong>Não identifica corrupção nem atribui culpa.</strong> Um ajuste direto ou um concurso com um só concorrente podem ser
+totalmente legais. Cada score é a soma transparente de sinais, e cada sinal mostra porque disparou e de que fonte vem.</p>
+
+<h2>Indicadores ativos</h2>
+<div id="indicadores" class="mut">a carregar…</div>
+
+<h2>Fontes</h2>
+<ul>
+  <li><strong>Portal BASE / IMPIC</strong>, via dados.gov.pt — dataset “Contratos Públicos – Portal Base – IMPIC – Contratos de 2012 a 2026”,
+  republicado semanalmente. Cada contrato liga ao seu registo em base.gov.pt.</li>
+  <li>O dataset OCDS do Portal BASE em dados.gov.pt <strong>não é usado</strong>: está desatualizado desde 2022.</li>
+</ul>
+
+<h2>Limites conhecidos dos dados</h2>
+<ul>
+  <li><strong>Concorrentes:</strong> a lista de concorrentes está vazia em parte dos procedimentos concorrenciais
+  (em 2025, cerca de 1 em cada 3 concursos públicos). Nesses casos o indicador fica “dados insuficientes” — nunca se assume um só concorrente.</li>
+  <li><strong>Adjudicatários sem NIF:</strong> a fonte omite o NIF de alguns adjudicatários (sobretudo pessoas singulares e empresas estrangeiras).
+  São identificados apenas pelo nome, com a marca “sem NIF na fonte”; homónimos podem ser fundidos ou separados incorretamente.</li>
+  <li><strong>Vários adjudicatários:</strong> o valor total de um contrato conta para cada adjudicatário (não é repartido).</li>
+  <li>Registos repetidos, preços nulos e datas em falta ficam no relatório de qualidade de dados (<a href="/api/qualidade">/api/qualidade</a>), nunca são corrigidos por estimativa.</li>
+</ul>
+
+<h2>Relações e pessoas</h2>
+<ul>
+  <li>Toda a relação tem período de validade (início/fim) e data em que foi registada, para distinguir <strong>atual</strong> de <strong>histórica</strong>.</li>
+  <li><strong>Relação documentada</strong> = vem diretamente de uma fonte citada. <strong>Relação inferida</strong> = deduzida (ex.: morada comum),
+  com grau de confiança. As duas são sempre rotuladas e mostradas de forma distinta.</li>
+  <li>Perfis de pessoas (fase futura) limitam-se a factos de registo público — cargos públicos, cargos e participações societárias, declarações
+  à Entidade para a Transparência — cada um com fonte e data. Não se incluem relações pessoais privadas nem pessoas sem cargo público ou societário relevante.</li>
+</ul>
+
+<h2>Dados pessoais (RGPD)</h2>
+<p>Os dados de contratação são públicos por lei, mas aplicamos minimização: mostramos apenas o necessário à finalidade de interesse público,
+não enriquecemos dados de pessoas singulares que sejam apenas fornecedores, e qualquer pessoa pode pedir a correção ou remoção dos seus dados
+(contacto a definir). Pedidos aceites ocultam a pessoa em todas as vistas.</p>
+<p class="mut">Referência metodológica: Fazekas, M. et al., Corruption Risk Index (Government Transparency Institute).</p>
+
+<script>
+fetch('/api/meta').then(r => r.json()).then(m => {
+  const el = document.getElementById('indicadores'); el.className = ''; el.innerHTML = '';
+  const t = document.createElement('table');
+  t.innerHTML = '<tr><th>Indicador</th><th>Pontos</th><th>O que mede</th><th>Quando pode ser legítimo</th></tr>';
+  for (const i of m.indicadores) {
+    const tr = t.insertRow();
+    [i.nome, i.pontos, i.descricao, i.limites].forEach(v => tr.insertCell().textContent = v);
+  }
+  el.append(t);
+});
+</script>
+</body>
+</html>

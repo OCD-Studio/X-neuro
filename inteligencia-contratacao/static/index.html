@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="pt-PT">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sinais de Risco — Contratação Pública</title>
+<style>
+  :root { --bg:#fafaf9; --fg:#1c1917; --mut:#78716c; --linha:#e7e5e4; --acento:#b45309; --cartao:#fff; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#1c1917; --fg:#f5f5f4; --mut:#a8a29e; --linha:#44403c; --acento:#f59e0b; --cartao:#292524; } }
+  * { box-sizing: border-box; }
+  body { margin:0; font:14px/1.45 system-ui, sans-serif; background:var(--bg); color:var(--fg); }
+  header { padding:16px; border-bottom:1px solid var(--linha); display:flex; flex-wrap:wrap; gap:8px 24px; align-items:baseline; }
+  header h1 { font-size:18px; margin:0; }
+  header .meta { color:var(--mut); font-size:13px; }
+  .aviso { margin:12px 16px; padding:10px 12px; border-left:3px solid var(--acento); background:var(--cartao); font-size:13px; }
+  form { display:flex; flex-wrap:wrap; gap:8px; padding:0 16px 12px; }
+  label { display:flex; flex-direction:column; font-size:12px; color:var(--mut); }
+  input, select, button { font:inherit; padding:5px 7px; border:1px solid var(--linha); border-radius:6px; background:var(--cartao); color:var(--fg); }
+  button { cursor:pointer; align-self:flex-end; }
+  .tabela { overflow-x:auto; padding:0 16px 24px; }
+  table { border-collapse:collapse; width:100%; background:var(--cartao); }
+  th, td { padding:6px 8px; border-bottom:1px solid var(--linha); text-align:left; white-space:nowrap; }
+  th { cursor:pointer; font-size:12px; color:var(--mut); user-select:none; }
+  th.ativo { color:var(--fg); }
+  td.num { text-align:right; font-variant-numeric:tabular-nums; }
+  td.nome { white-space:normal; min-width:220px; }
+  .tag { font-size:11px; color:var(--mut); }
+  a { color:var(--acento); }
+</style>
+</head>
+<body>
+<header>
+  <h1>Sinais de risco na contratação pública</h1>
+  <span class="meta" id="meta">a carregar…</span>
+  <a href="/metodologia">Metodologia e limites</a>
+</header>
+<p class="aviso">Esta lista mostra <strong>indicadores de risco</strong> calculados a partir de dados públicos (Portal BASE).
+Um sinal <strong>não é prova nem acusação</strong>: pode ter justificação legal. Serve apenas como pista para investigação humana.</p>
+
+<form id="filtros">
+  <label>Papel <select name="papel"><option value="fornecedor">Fornecedor</option><option value="adjudicante">Adjudicante</option></select></label>
+  <label>De <input type="date" name="de"></label>
+  <label>Até <input type="date" name="ate"></label>
+  <label>Distrito <select name="distrito"><option value="">Todos</option></select></label>
+  <label>Procedimento <select name="procedimento"><option value="">Todos</option></select></label>
+  <label>CPV (prefixo) <input name="cpv" size="9" placeholder="ex. 45"></label>
+  <label>Valor mín. € <input type="number" name="valor_min" style="width:110px"></label>
+  <label>Valor máx. € <input type="number" name="valor_max" style="width:110px"></label>
+  <label>Score mín. <input type="number" name="score_min" style="width:80px"></label>
+  <label>Nome/NIF <input name="q" size="16"></label>
+  <button type="submit">Aplicar</button>
+  <button type="button" id="csv">Exportar CSV</button>
+</form>
+
+<div class="tabela">
+<table>
+  <thead><tr>
+    <th data-o="">Entidade</th>
+    <th data-o="n_contratos">Nº contratos</th>
+    <th data-o="total" class="ativo">Total (€) ▼</th>
+    <th data-o="valor_medio">Valor médio (€)</th>
+    <th data-o="pct_ajuste_direto">% ajuste direto</th>
+    <th data-o="n_sinais">Nº sinais</th>
+    <th data-o="score">Score de risco</th>
+  </tr></thead>
+  <tbody id="corpo"></tbody>
+</table>
+</div>
+
+<script>
+const eur = new Intl.NumberFormat('pt-PT', { maximumFractionDigits: 0 });
+let ordenar = 'total', direcao = 'desc';
+const f = document.getElementById('filtros');
+
+function params() {
+  const p = new URLSearchParams();
+  for (const [k, v] of new FormData(f)) if (v) p.append(k, v);
+  p.set('ordenar', ordenar); p.set('direcao', direcao);
+  return p;
+}
+async function carregar() {
+  const corpo = document.getElementById('corpo');
+  corpo.innerHTML = '<tr><td colspan="7">a carregar…</td></tr>';
+  const r = await fetch('/api/entidades?' + params());
+  const d = await r.json();
+  corpo.innerHTML = '';
+  for (const e of d.resultados || []) {
+    const tr = document.createElement('tr');
+    const id = e.identificado_por === 'nif' ? 'NIF ' + e.nif : 'sem NIF na fonte';
+    tr.innerHTML = `<td class="nome"></td><td class="num">${e.n_contratos}</td><td class="num">${eur.format(e.total)}</td>
+      <td class="num">${eur.format(e.valor_medio)}</td><td class="num">${e.pct_ajuste_direto}%</td>
+      <td class="num">${e.n_sinais}</td><td class="num">${e.score}</td>`;
+    tr.cells[0].textContent = e.nome;
+    const t = document.createElement('div'); t.className = 'tag'; t.textContent = id; tr.cells[0].append(t);
+    corpo.append(tr);
+  }
+  if (!corpo.children.length) corpo.innerHTML = '<tr><td colspan="7">Sem resultados.</td></tr>';
+}
+document.querySelectorAll('th[data-o]').forEach(th => th.onclick = () => {
+  if (!th.dataset.o) return;
+  if (ordenar === th.dataset.o) direcao = direcao === 'desc' ? 'asc' : 'desc'; else { ordenar = th.dataset.o; direcao = 'desc'; }
+  document.querySelectorAll('th').forEach(x => { x.classList.remove('ativo'); x.textContent = x.textContent.replace(/ [▲▼]$/, ''); });
+  th.classList.add('ativo'); th.textContent += direcao === 'desc' ? ' ▼' : ' ▲';
+  carregar();
+});
+f.onsubmit = e => { e.preventDefault(); carregar(); };
+document.getElementById('csv').onclick = () => { const p = params(); p.set('formato', 'csv'); location = '/api/entidades?' + p; };
+
+(async () => {
+  const m = await (await fetch('/api/meta')).json();
+  const anos = m.cobertura.filter(c => c.estado === 'ingerido').map(c => c.ano);
+  document.getElementById('meta').textContent =
+    `Última atualização: ${m.ultima_atualizacao ? new Date(m.ultima_atualizacao).toLocaleString('pt-PT') : '—'} · ` +
+    `Cobertura histórica: ${anos.length ? anos.join(', ') : 'nenhuma'}`;
+  const sp = f.procedimento;
+  for (const [k, v] of Object.entries(m.procedimentos)) sp.add(new Option(v, k));
+  const ds = await (await fetch('/api/distritos')).json();
+  for (const d of ds) f.distrito.add(new Option(d, d));
+  carregar();
+})();
+</script>
+</body>
+</html>
