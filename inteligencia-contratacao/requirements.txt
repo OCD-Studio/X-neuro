@@ -4,4 +4,5 @@ psycopg[binary]>=3.1
 httpx>=0.27
 ijson>=3.2
 apscheduler>=3.10,<4
+a2wsgi>=1.10       # só para cPanel/Passenger (passenger_wsgi.py)
 pytest>=8
