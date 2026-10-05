@@ -97,11 +97,14 @@ def test_score_sql_igual_ao_python(con):
     api.bd.ligar = lambda url=None: orig(URL)
     try:
         cli = TestClient(api.app)
-        rapido = cli.get("/api/entidades").json()
+        resumo = cli.get("/api/entidades").json()
+        rapido = cli.get("/api/entidades?de=2025-01-01&ate=2025-12-31").json()
         filtrado = cli.get("/api/entidades?distrito=Porto").json()
-        assert rapido["caminho"] == "agregados" and filtrado["caminho"] == "contratos"
+        assert (resumo["caminho"], rapido["caminho"], filtrado["caminho"]) == ("resumo", "agregados", "contratos")
+        x_s = {r["nif"]: r for r in resumo["resultados"]}["500697370"]
         x_r = {r["nif"]: r for r in rapido["resultados"]}["500697370"]
         x_f = {r["nif"]: r for r in filtrado["resultados"]}["500697370"]
+        assert {k: x_s[k] for k in ("score", "n_sinais", "n_contratos")} == {k: x_r[k] for k in ("score", "n_sinais", "n_contratos")}
         det = cli.get(f"/api/entidades/{x_r['id']}/risco").json()
     finally:
         api.bd.ligar = orig

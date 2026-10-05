@@ -21,6 +21,7 @@ from . import bd
 from .config import RAIZ
 from .normalizacao import PROCEDIMENTOS
 from .calibracao import MIN_CONTRATOS_ENTIDADE, Z_CONFIANCA, score_entidade
+from .consultas import sql_score
 from .regras import TODOS
 
 from contextlib import asynccontextmanager
@@ -70,6 +71,9 @@ def meta():
         ultima_alteracao = con.execute(
             "SELECT max(terminado_em) AS t FROM meta.execucao_ingestao "
             "WHERE estado = 'concluido' AND (inseridos > 0 OR atualizados > 0)").fetchone()["t"]
+        nao_listados = con.execute(
+            "SELECT count(*) AS n FROM resumo_entidade r JOIN entidade e ON e.id = r.entidade_id "
+            "WHERE r.papel = 'f' AND e.tipo_pessoa NOT IN ('coletiva', 'coletiva_sem_nif')").fetchone()["n"]
         cobertura = con.execute(
             "SELECT fonte, ano, estado, n_registos, versao_fonte, atualizado_em FROM meta.cobertura "
             "WHERE fonte = 'base_contratos' ORDER BY ano"
@@ -79,6 +83,7 @@ def meta():
         "estado_ultima_verificacao": sinc["estado"] if sinc else None,
         "ultima_atualizacao": ultima_alteracao,
         "cobertura": cobertura,
+        "fornecedores_nao_listados": nao_listados,
         "procedimentos": {k: v["rotulo"] for k, v in PROCEDIMENTOS.items()},
         "indicadores": [
             {"codigo": i.codigo, "nome": i.nome, "pontos": i.pontos, "descricao": i.descricao,
@@ -145,6 +150,22 @@ def qualidade():
 
 
 NIVEIS = {"baixo": (0, 19), "medio": (20, 49), "alto": (50, 100)}
+
+# Minimização de dados pessoais: só pessoas coletivas aparecem em listas e explicações (ver sql/010).
+TIPOS_LISTAVEIS = ("coletiva", "coletiva_sem_nif")
+_SQL_LISTAVEL = "e.tipo_pessoa IN ('coletiva', 'coletiva_sem_nif')"
+_MSG_PROTEGIDO = ("Não disponível: a entidade parece ser uma pessoa singular (a fonte não publica o NIF). "
+                  "Por minimização de dados pessoais não é listada nem perfilada.")
+
+
+def _verificar_listavel(con, entidade_id: int) -> dict:
+    ent = con.execute("SELECT id, nif, identificado_por, nome, tipo_pessoa FROM entidade WHERE id = %s",
+                      (entidade_id,)).fetchone()
+    if not ent:
+        raise HTTPException(404, "entidade não encontrada")
+    if ent["tipo_pessoa"] not in TIPOS_LISTAVEIS:
+        raise HTTPException(404, _MSG_PROTEGIDO)
+    return ent
 
 
 @dataclass
@@ -219,32 +240,6 @@ def _sql_base(f: Filtros) -> tuple[str, str, dict]:
     return ag, ind, par
 
 
-# Score por indicador (igual a calibracao.score_entidade — testado) e média dos indicadores com amostra suficiente.
-_SQL_SCORE = """
-    wl AS (
-        SELECT *, e / n AS p_esp,
-               ((o::float8 / n) + %(z)s ^ 2 / (2 * n)
-                 - %(z)s * sqrt((o::float8 / n) * (1 - o::float8 / n) / n + %(z)s ^ 2 / (4 * n * n)))
-               / (1 + %(z)s ^ 2 / n) AS l
-        FROM ind WHERE n > 0
-    ),
-    sc AS (
-        SELECT eid, indicador_id, o, e, n, pontos,
-               CASE WHEN n < %(nmin)s OR l <= p_esp THEN 0
-                    WHEN p_esp >= 1 THEN 100
-                    ELSE least(100, round(100 * (l - p_esp) / (1 - p_esp))) END AS score
-        FROM wl
-    ),
-    f AS (
-        SELECT eid, coalesce(round(avg(score) FILTER (WHERE n >= %(nmin)s)), 0) AS score,
-               count(*) FILTER (WHERE n >= %(nmin)s) AS n_indicadores,
-               sum(o) AS n_sinais, round(sum(e)::numeric, 1) AS esperados, sum(n) AS n_avaliaveis,
-               sum(pontos) AS pontos
-        FROM sc GROUP BY eid
-    )
-"""
-
-
 @app.get("/api/entidades")
 def entidades(
     papel: Literal["adjudicante", "fornecedor"] = "fornecedor",
@@ -274,7 +269,8 @@ def entidades(
     fl = Filtros(papel, de, ate, distrito, procedimento, cpv, valor_min, valor_max)
     ag, ind, par = _sql_base(fl)
     par.update(z=Z_CONFIANCA, nmin=MIN_CONTRATOS_ENTIDADE)
-    cond = ["TRUE"]
+    historico_completo = fl.rapido and de is None and ate is None
+    cond = [_SQL_LISTAVEL]
     if q:
         cond.append("(e.nome ILIKE %(q)s OR e.nif = %(qnif)s)"); par["q"] = f"%{q}%"; par["qnif"] = q.strip()
     if score_min is not None:
@@ -283,9 +279,24 @@ def entidades(
         cond.append("coalesce(f.score, 0) BETWEEN %(nmin_s)s AND %(nmax_s)s")
         par["nmin_s"], par["nmax_s"] = NIVEIS[nivel]
     par.update(lim=limite if formato == "json" else 100000, off=pagina * limite if formato == "json" else 0)
-    sql = f"""
-        WITH ag AS ({ag}), ind AS ({ind}), {_SQL_SCORE}
-        SELECT e.id, e.nif, e.identificado_por, e.nome, ag.n_contratos, ag.total,
+    if historico_completo:
+        # tudo pré-calculado na pontuação (resumo_entidade): leitura direta
+        sql = f"""
+        WITH f AS (SELECT entidade_id AS eid, * FROM resumo_entidade WHERE papel = %(papel)s),
+             ag AS (SELECT eid, n_contratos, total, n_ajuste_direto AS n_ad FROM f)
+        SELECT e.id, e.nif, e.identificado_por, e.tipo_pessoa, e.nome, ag.n_contratos, ag.total,
+               round(ag.total / nullif(ag.n_contratos, 0), 2) AS valor_medio,
+               round(100.0 * ag.n_ad / nullif(ag.n_contratos, 0), 1) AS pct_ajuste_direto,
+               f.score, f.n_indicadores, f.n_sinais, f.esperados, f.n_avaliaveis, f.pontos
+        FROM ag JOIN entidade e ON e.id = ag.eid JOIN f ON f.eid = ag.eid
+        WHERE {' AND '.join(cond)}
+        ORDER BY {ORDENACOES[ordenar]} {direcao} NULLS LAST, e.id
+        LIMIT %(lim)s OFFSET %(off)s
+        """
+    else:
+        sql = f"""
+        WITH ag AS ({ag}), ind AS ({ind}), {sql_score()}
+        SELECT e.id, e.nif, e.identificado_por, e.tipo_pessoa, e.nome, ag.n_contratos, ag.total,
                round(ag.total / nullif(ag.n_contratos, 0), 2) AS valor_medio,
                round(100.0 * ag.n_ad / nullif(ag.n_contratos, 0), 1) AS pct_ajuste_direto,
                coalesce(f.score, 0) AS score, coalesce(f.n_indicadores, 0) AS n_indicadores,
@@ -304,7 +315,8 @@ def entidades(
         w.writeheader(); w.writerows(linhas)
         return StreamingResponse(iter([buf.getvalue()]), media_type="text/csv",
                                  headers={"Content-Disposition": f"attachment; filename=entidades_{papel}.csv"})
-    return {"papel": papel, "caminho": "agregados" if fl.rapido else "contratos", "resultados": linhas}
+    caminho = "resumo" if historico_completo else ("agregados" if fl.rapido else "contratos")
+    return {"papel": papel, "caminho": caminho, "resultados": linhas}
 
 
 @app.get("/api/entidades/{entidade_id}/risco")
@@ -324,9 +336,7 @@ def risco_entidade(
     _, ind, par = _sql_base(fl)
     par["eid"] = entidade_id
     with bd.ligar() as con:
-        ent = con.execute("SELECT id, nif, identificado_por, nome FROM entidade WHERE id = %(eid)s", par).fetchone()
-        if not ent:
-            raise HTTPException(404, "entidade não encontrada")
+        ent = _verificar_listavel(con, entidade_id)
         linhas = con.execute(
             f"SELECT i.codigo, x.o, x.e, x.n FROM ({ind}) x JOIN indicador i ON i.id = x.indicador_id "
             f"WHERE x.eid = %(eid)s", par).fetchall()
@@ -354,6 +364,8 @@ def contratos(
 ):
     cond, par = ["TRUE"], {}
     if entidade_id:
+        with bd.ligar() as con:
+            _verificar_listavel(con, entidade_id)
         if papel == "adjudicante":
             cond.append("k.adjudicante_id = %(e)s")
         elif papel == "fornecedor":

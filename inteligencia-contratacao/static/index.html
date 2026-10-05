@@ -44,6 +44,7 @@
   <a href="/qualidade">Qualidade dos dados</a>
   <a href="/metodologia">Metodologia e limites</a>
 </header>
+<p class="aviso" id="minimizacao" hidden></p>
 <p class="aviso">O <strong>score (0–100)</strong> compara cada entidade com o que seria de esperar no mesmo tipo de procedimento, setor e ano — não depende do número de contratos.
 Clique numa linha para ver a explicação. Esta lista mostra <strong>indicadores de risco</strong> calculados a partir de dados públicos (Portal BASE).
 Um sinal <strong>não é prova nem acusação</strong>: pode ter justificação legal. Serve apenas como pista para investigação humana.</p>
@@ -81,6 +82,7 @@ Um sinal <strong>não é prova nem acusação</strong>: pode ter justificação 
 
 <script>
 const eur = new Intl.NumberFormat('pt-PT', { maximumFractionDigits: 0 });
+const nf0 = new Intl.NumberFormat('pt-PT');
 let ordenar = 'total', direcao = 'desc';
 const f = document.getElementById('filtros');
 
@@ -98,7 +100,7 @@ async function carregar() {
   corpo.innerHTML = '';
   for (const e of d.resultados || []) {
     const tr = document.createElement('tr');
-    const id = e.identificado_por === 'nif' ? 'NIF ' + e.nif : 'sem NIF na fonte';
+    const id = e.identificado_por === 'nif' ? 'NIF ' + e.nif : 'sem NIF na fonte · classificada como empresa pelo nome';
     tr.innerHTML = `<td class="nome"></td><td class="num">${e.n_contratos}</td><td class="num">${eur.format(e.total)}</td>
       <td class="num">${eur.format(e.valor_medio)}</td><td class="num">${e.pct_ajuste_direto}%</td>
       <td class="num">${e.n_sinais} / ${Number(e.esperados).toFixed(1)}</td><td class="num"><strong class="nivel-${e.score >= 50 ? 'alto' : e.score >= 20 ? 'medio' : 'baixo'}">${e.score}</strong></td>`;
@@ -171,6 +173,11 @@ document.getElementById('csv').onclick = () => { const p = params(); p.set('form
   document.getElementById('meta').textContent =
     `Verificado: ${dtf(m.ultima_verificacao)} · Dados alterados: ${dtf(m.ultima_atualizacao)} · ` +
     `Cobertura histórica: ${cob || 'nenhuma'} (${anos.length}/${total} anos)`;
+  if (m.fornecedores_nao_listados) {
+    const mz = document.getElementById('minimizacao'); mz.hidden = false;
+    mz.textContent = `Proteção de dados: ${nf0.format(m.fornecedores_nao_listados)} fornecedores que parecem pessoas singulares ` +
+      '(a fonte não publica o seu NIF) não são listados nem perfilados. Os seus contratos contam para os indicadores das entidades públicas.';
+  }
   const sp = f.procedimento;
   for (const [k, v] of Object.entries(m.procedimentos)) sp.add(new Option(v, k));
   const ds = await (await fetch('/api/distritos')).json();
