@@ -214,6 +214,7 @@ _MAPA_PROCEDIMENTO: list[tuple[str, str]] = [
     ("parceria para a inovacao", "parceria_inovacao"),
     ("concurso de concecao", "concurso_concecao"),
     ("concurso de conceccao", "concurso_concecao"),
+    ("concurso de ideias", "concurso_concecao"),  # variante do concurso de conceção
     ("ao abrigo de acordo", "acordo_quadro"),
     ("acordo-quadro", "acordo_quadro"),
     ("acordo quadro", "acordo_quadro"),

@@ -85,6 +85,7 @@ def test_parse_valor():
     ("Setores especiais – isenção parte II", "setores_especiais_isencao"),
     ("Procedimento de negociação", "negociacao"),
     ("Concurso de conceção simplificado", "concurso_concecao"),
+    ("Concurso de ideias simplificado", "concurso_concecao"),
     ("Coisa nova desconhecida", "outro"),
     (None, "outro"),
 ])
