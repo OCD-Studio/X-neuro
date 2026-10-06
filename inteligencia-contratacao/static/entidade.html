@@ -1,0 +1,266 @@
+<!doctype html>
+<html lang="pt-PT">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Perfil de entidade</title>
+<style>
+  :root { color-scheme: light;
+    --bg:#fafaf9; --surface:#fcfcfb; --fg:#1c1917; --mut:#78716c; --linha:#e7e5e4; --acento:#b45309;
+    --serie:#2a78d6; --no-centro:#1c1917; --no-adj:#2a78d6; --no-forn:#eb6834; --no-anon:#a8a29e;
+    --aresta:#78716c; --aresta-inf:#eb6834; --alto:#b91c1c; }
+  @media (prefers-color-scheme: dark) { :root:where(:not([data-theme="light"])) { color-scheme: dark;
+    --bg:#1c1917; --surface:#1a1a19; --fg:#f5f5f4; --mut:#a8a29e; --linha:#44403c; --acento:#f59e0b;
+    --serie:#3987e5; --no-centro:#f5f5f4; --no-adj:#3987e5; --no-forn:#d95926; --no-anon:#57534e;
+    --aresta:#a8a29e; --aresta-inf:#d95926; --alto:#f87171; } }
+  :root[data-theme="dark"] { color-scheme: dark;
+    --bg:#1c1917; --surface:#1a1a19; --fg:#f5f5f4; --mut:#a8a29e; --linha:#44403c; --acento:#f59e0b;
+    --serie:#3987e5; --no-centro:#f5f5f4; --no-adj:#3987e5; --no-forn:#d95926; --no-anon:#57534e;
+    --aresta:#a8a29e; --aresta-inf:#d95926; --alto:#f87171; }
+  * { box-sizing:border-box; }
+  body { margin:0 auto; max-width:1150px; padding:16px; font:14px/1.5 system-ui, sans-serif; background:var(--bg); color:var(--fg); }
+  a { color:var(--acento); } .mut { color:var(--mut); font-size:13px; }
+  h1 { font-size:22px; margin:6px 0 2px; } h2 { font-size:16px; margin:28px 0 8px; border-top:1px solid var(--linha); padding-top:14px; }
+  h3 { font-size:14px; margin:16px 0 6px; }
+  .aviso { padding:10px 12px; border-left:3px solid var(--acento); background:var(--surface); font-size:13px; margin:10px 0; }
+  .tabs button { font:inherit; padding:5px 12px; border:1px solid var(--linha); background:var(--surface); color:var(--fg); border-radius:6px; cursor:pointer; }
+  .tabs button[aria-pressed="true"] { border-color:var(--fg); font-weight:600; }
+  .kpis { display:flex; flex-wrap:wrap; gap:10px; margin:10px 0; }
+  .kpi { background:var(--surface); border:1px solid var(--linha); border-radius:8px; padding:8px 12px; min-width:140px; }
+  .kpi b { display:block; font-size:20px; font-variant-numeric:tabular-nums; } .kpi span { font-size:12px; color:var(--mut); }
+  .tabela { overflow-x:auto; }
+  table { border-collapse:collapse; width:100%; background:var(--surface); font-size:13px; }
+  th, td { padding:5px 8px; border-bottom:1px solid var(--linha); text-align:left; vertical-align:top; }
+  th { color:var(--mut); font-weight:600; } td.num { text-align:right; font-variant-numeric:tabular-nums; white-space:nowrap; }
+  .barra-h { height:8px; background:var(--serie); border-radius:0 4px 4px 0; min-width:2px; }
+  #grafico { position:relative; } #grafico svg { width:100%; height:220px; display:block; }
+  #grafico .barra { fill:var(--serie); } #grafico .barra:hover, #grafico .barra.ativa { opacity:.75; }
+  #grafico .eixo { stroke:var(--linha); } #grafico text { fill:var(--mut); font-size:11px; }
+  .tooltip { position:absolute; pointer-events:none; background:var(--surface); border:1px solid var(--linha); border-radius:6px;
+    padding:6px 8px; font-size:12px; box-shadow:0 2px 8px rgba(0,0,0,.12); display:none; white-space:nowrap; }
+  #rede { height:520px; border:1px solid var(--linha); border-radius:8px; background:var(--surface); }
+  .filtros-rede { display:flex; flex-wrap:wrap; gap:8px; align-items:flex-end; margin-bottom:8px; }
+  .filtros-rede label { display:flex; flex-direction:column; font-size:12px; color:var(--mut); }
+  input, select { font:inherit; padding:4px 6px; border:1px solid var(--linha); border-radius:6px; background:var(--surface); color:var(--fg); }
+  .legenda { display:flex; flex-wrap:wrap; gap:14px; font-size:12px; color:var(--mut); margin:8px 0; align-items:center; }
+  .legenda i { display:inline-block; width:12px; height:12px; border-radius:50%; vertical-align:-2px; margin-right:4px; }
+  .legenda s { display:inline-block; width:28px; height:0; border-top:2px solid var(--aresta); vertical-align:middle; margin-right:4px; text-decoration:none; }
+  #info-aresta { min-height:40px; font-size:13px; }
+  .nivel-alto { color:var(--alto); font-weight:600; }
+</style>
+</head>
+<body>
+<p><a href="/">← Lista</a> · <a href="/metodologia">Metodologia e limites</a></p>
+<div id="cabecalho">a carregar…</div>
+<p class="aviso">Perfil construído só com dados públicos de contratação (Portal BASE). Os sinais são <strong>indicadores de risco</strong>,
+não prova nem acusação. Relações <strong>documentadas</strong> vêm diretamente da fonte; relações <strong>inferidas</strong> são deduções, com grau de confiança.</p>
+
+<div class="tabs" id="tabs"></div>
+<div id="papel"></div>
+
+<h2>Lugar no grafo de relações</h2>
+<div class="filtros-rede">
+  <label>De <input type="date" id="g-de"></label>
+  <label>Até <input type="date" id="g-ate"></label>
+  <label>Relações <select id="g-estado"><option value="todas">Atuais e passadas</option><option value="atuais">Só atuais</option><option value="passadas">Só passadas</option></select></label>
+  <label>Natureza <select id="g-inf"><option value="1">Documentadas e inferidas</option><option value="0">Só documentadas</option></select></label>
+</div>
+<div class="legenda">
+  <span><i style="background:var(--no-centro)"></i>esta entidade</span>
+  <span><i style="background:var(--no-adj)"></i>entidade adjudicante</span>
+  <span><i style="background:var(--no-forn)"></i>fornecedor</span>
+  <span><i style="background:var(--no-anon)"></i>pessoas singulares agregadas (sem nomes)</span>
+  <span><s></s>documentada · atual</span>
+  <span><s style="opacity:.35"></s>documentada · passada</span>
+  <span><s style="border-top:2px dashed var(--aresta-inf)"></s>inferida</span>
+</div>
+<div id="rede" role="img" aria-label="Grafo de relações da entidade"></div>
+<p class="mut" id="rede-nota"></p>
+<div id="info-aresta" class="mut">Clique numa ligação para ver a fonte e o período; clique numa entidade para abrir o seu perfil.</div>
+
+<h2>Variantes de nome registadas</h2>
+<p class="mut">A entidade é identificada pelo NIF; estes são os nomes com que aparece na fonte (resolução de entidades auditável).</p>
+<ul id="nomes"></ul>
+
+<script src="/static/vendor/cytoscape.min.js"></script>
+<script>
+const ID = location.pathname.split('/').filter(Boolean).pop();
+const eur = v => new Intl.NumberFormat('pt-PT', { style:'currency', currency:'EUR', maximumFractionDigits:0 }).format(v || 0);
+const nf = new Intl.NumberFormat('pt-PT');
+const dt = s => s ? new Date(s).toLocaleDateString('pt-PT') : '—';
+const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const el = (tag, txt, cls) => { const e = document.createElement(tag); if (txt != null) e.textContent = txt; if (cls) e.className = cls; return e; };
+let PERFIL;
+
+function tabela(cab, linhas, numCols = []) {
+  const t = el('table'); const h = t.createTHead().insertRow();
+  cab.forEach(c => h.append(el('th', c)));
+  const b = t.createTBody();
+  for (const l of linhas) { const tr = b.insertRow(); l.forEach((v, i) => {
+    const td = tr.insertCell(); if (v instanceof Node) td.append(v); else td.textContent = v ?? '—';
+    if (numCols.includes(i)) td.className = 'num'; }); }
+  const w = el('div', null, 'tabela'); w.append(t); return w;
+}
+
+function graficoAnos(anos) {
+  // barras: total contratado por ano (uma série; tooltip por barra; tabela equivalente abaixo)
+  const w = el('div'); w.id = 'grafico';
+  const W = 900, H = 220, m = { t: 10, r: 10, b: 24, l: 70 };
+  const max = Math.max(...anos.map(a => +a.total), 1);
+  const bw = (W - m.l - m.r) / Math.max(anos.length, 1);
+  const ns = 'http://www.w3.org/2000/svg';
+  const svg = document.createElementNS(ns, 'svg'); svg.setAttribute('viewBox', `0 0 ${W} ${H}`); svg.setAttribute('role', 'img');
+  svg.setAttribute('aria-label', 'Total contratado por ano');
+  const tip = el('div', null, 'tooltip');
+  for (const f of [0, .5, 1]) {
+    const y = m.t + (H - m.t - m.b) * (1 - f);
+    const ln = document.createElementNS(ns, 'line'); ln.setAttribute('class', 'eixo');
+    Object.entries({ x1: m.l, x2: W - m.r, y1: y, y2: y }).forEach(([k, v]) => ln.setAttribute(k, v)); svg.append(ln);
+    const tx = document.createElementNS(ns, 'text'); tx.textContent = eur(max * f);
+    tx.setAttribute('x', m.l - 6); tx.setAttribute('y', y + 4); tx.setAttribute('text-anchor', 'end'); svg.append(tx);
+  }
+  anos.forEach((a, i) => {
+    const hgt = (H - m.t - m.b) * (+a.total / max);
+    const x = m.l + i * bw + 2, y = H - m.b - hgt, wd = Math.max(bw - 4, 1);
+    const r = Math.min(4, wd / 2, hgt);
+    const p = document.createElementNS(ns, 'path'); p.setAttribute('class', 'barra');
+    p.setAttribute('d', `M${x},${H - m.b} V${y + r} Q${x},${y} ${x + r},${y} H${x + wd - r} Q${x + wd},${y} ${x + wd},${y + r} V${H - m.b} Z`);
+    // alvo de hover maior que a barra
+    const alvo = document.createElementNS(ns, 'rect');
+    Object.entries({ x: m.l + i * bw, y: m.t, width: bw, height: H - m.t - m.b, fill: 'transparent' }).forEach(([k, v]) => alvo.setAttribute(k, v));
+    alvo.addEventListener('mousemove', ev => {
+      p.classList.add('ativa'); tip.style.display = 'block';
+      tip.textContent = `${a.ano}: ${eur(a.total)} · ${nf.format(a.n_contratos)} contratos · ${Math.round(100 * a.n_ajuste_direto / a.n_contratos)}% ajuste direto`;
+      const r0 = w.getBoundingClientRect(); tip.style.left = Math.min(ev.clientX - r0.left + 12, r0.width - 260) + 'px'; tip.style.top = (ev.clientY - r0.top - 30) + 'px';
+    });
+    alvo.addEventListener('mouseleave', () => { p.classList.remove('ativa'); tip.style.display = 'none'; });
+    svg.append(p, alvo);
+    if (anos.length <= 16 || i % 2 === 0) {
+      const tx = document.createElementNS(ns, 'text'); tx.textContent = a.ano;
+      tx.setAttribute('x', x + wd / 2); tx.setAttribute('y', H - 8); tx.setAttribute('text-anchor', 'middle'); svg.append(tx);
+    }
+  });
+  w.append(svg, tip);
+  const det = el('details'); det.append(el('summary', 'Ver como tabela'),
+    tabela(['Ano', 'Contratos', 'Total', '% ajuste direto'], anos.map(a => [a.ano, nf.format(a.n_contratos), eur(a.total),
+      Math.round(100 * a.n_ajuste_direto / a.n_contratos) + '%']), [1, 2, 3]));
+  const c = el('div'); c.append(w, det); return c;
+}
+
+async function mostrarPapel(nomePapel) {
+  document.querySelectorAll('#tabs button').forEach(b => b.setAttribute('aria-pressed', b.dataset.p === nomePapel));
+  const d = PERFIL.papeis[nomePapel], r = d.resumo, alvo = document.getElementById('papel');
+  alvo.innerHTML = '';
+  const k = el('div', null, 'kpis');
+  const nivel = r.score >= 50 ? 'alto' : r.score >= 20 ? 'médio' : 'baixo';
+  [[nf.format(r.n_contratos), 'contratos'], [eur(r.total), 'total contratado'], [eur(r.total / r.n_contratos), 'valor médio'],
+   [Math.round(100 * r.n_ajuste_direto / r.n_contratos) + '%', 'ajuste direto'], [`${r.score} (${nivel})`, 'score de risco 0–100']]
+    .forEach(([v, t], i) => { const x = el('div', null, 'kpi'); const b = el('b', v); if (i === 4 && r.score >= 50) b.className = 'nivel-alto'; x.append(b, el('span', t)); k.append(x); });
+  alvo.append(k);
+
+  alvo.append(el('h2', `Sinais de risco (como ${nomePapel})`));
+  const risco = await (await fetch(`/api/entidades/${ID}/risco?papel=${nomePapel}`)).json();
+  alvo.append(el('p', `Score ${risco.score}/100 = média dos ${risco.n_indicadores} indicadores com ≥ 5 contratos avaliáveis. ` +
+    'Cada indicador compara a taxa de sinais com a esperada em contratos comparáveis (procedimento, setor CPV, ano).', 'mut'));
+  alvo.append(tabela(['Indicador', 'Score', 'Sinais / esperado', 'Avaliáveis', 'Explicação'],
+    risco.indicadores.filter(i => i.avaliaveis).map(i => [i.nome, i.score, `${i.observados} / ${i.esperados}`, nf.format(i.avaliaveis), i.explicacao]), [1, 2, 3]));
+
+  alvo.append(el('h2', 'Evolução anual (total contratado)'), graficoAnos(d.anos));
+
+  alvo.append(el('h2', nomePapel === 'adjudicante' ? 'Principais fornecedores' : 'Principais entidades adjudicantes'));
+  const maxT = Math.max(...d.contrapartes.map(c => +c.total || 0), 1);
+  alvo.append(tabela(['Entidade', 'Contratos', 'Total', '', 'Período', 'Relação'],
+    d.contrapartes.map(c => {
+      let nome = c.nome;
+      if (c.id) { nome = el('a', c.nome); nome.href = `/entidade/${c.id}`; }
+      const b = el('div', null, 'barra-h'); b.style.width = (100 * (+c.total || 0) / maxT) + '%';
+      return [nome, nf.format(c.n_contratos), eur(c.total), b, `${dt(c.desde)} – ${dt(c.ate)}`,
+        c.id ? (c.atual ? 'atual (em execução)' : 'passada') : `${nf.format(c.n_entidades)} pessoas agregadas`];
+    }), [1, 2]));
+
+  alvo.append(el('h2', 'Distribuição por tipo de procedimento'));
+  const maxP = Math.max(...d.procedimentos.map(p => p.n), 1);
+  alvo.append(tabela(['Procedimento', 'Contratos', '', 'Total'], d.procedimentos.map(p => {
+    const b = el('div', null, 'barra-h'); b.style.width = (100 * p.n / maxP) + '%';
+    return [PERFIL.procedimentos_rotulos[p.procedimento] || p.procedimento, nf.format(p.n), b, eur(p.total)]; }), [1, 3]));
+
+  alvo.append(el('h2', 'Contratos com sinais (mais recentes)'));
+  const cs = await (await fetch(`/api/contratos?entidade_id=${ID}&papel=${nomePapel}&limite=300`)).json();
+  const comSinal = cs.resultados.filter(c => c.sinais).slice(0, 25);
+  alvo.append(comSinal.length ? tabela(['Data', 'Objeto', 'Adjudicante', 'Valor', 'Sinais', 'Fonte'], comSinal.map(c => {
+    const s = el('div'); c.sinais.forEach(x => s.append(el('div', `${x.nome} (${x.pontos} pts): ${x.explicacao || ''}`)));
+    const a = el('a', 'BASE'); a.href = c.url_fonte; a.target = '_blank'; a.rel = 'noopener';
+    return [c.data_celebracao || c.data_publicacao, c.objeto, c.adjudicante, eur(c.preco_contratual), s, a]; }), [3])
+    : el('p', 'Sem sinais nos 300 contratos mais recentes.', 'mut'));
+}
+
+let cy;
+async function desenharRede() {
+  const p = new URLSearchParams({ entidade_id: ID, max_arestas: 30, estado: document.getElementById('g-estado').value,
+    inferidas: document.getElementById('g-inf').value === '1' });
+  for (const [k, id] of [['de', 'g-de'], ['ate', 'g-ate']]) { const v = document.getElementById(id).value; if (v) p.set(k, v); }
+  const g = await (await fetch('/api/grafo?' + p)).json();
+  const cor = { centro: css('--no-centro'), adjudicante: css('--no-adj'), fornecedor: css('--no-forn'), anonimo: css('--no-anon') };
+  const elems = [
+    ...g.nos.map(n => ({ data: { ...n, rotulo: n.nome + (n.score ? ` (${n.score})` : '') } })),
+    ...g.arestas.map(a => ({ data: { ...a } })),
+  ];
+  if (cy) cy.destroy();
+  cy = cytoscape({
+    container: document.getElementById('rede'), elements: elems, wheelSensitivity: 0.2,
+    layout: { name: 'concentric', concentric: n => n.data('papel') === 'centro' ? 10 : 1, levelWidth: () => 1, minNodeSpacing: 50, animate: false },
+    style: [
+      { selector: 'node', style: { 'background-color': n => cor[n.data('papel')], label: 'data(rotulo)', 'font-size': 11,
+          color: css('--fg'), 'text-wrap': 'ellipsis', 'text-max-width': 120, 'text-valign': 'bottom', 'text-margin-y': 4,
+          width: 16, height: 16, 'border-width': 2, 'border-color': css('--surface') } },
+      { selector: 'node[papel = "centro"]', style: { width: 28, height: 28, 'font-weight': 'bold', 'font-size': 12 } },
+      { selector: 'edge', style: { width: 2, 'line-color': css('--aresta'), 'curve-style': 'bezier', 'target-arrow-shape': 'triangle',
+          'target-arrow-color': css('--aresta'), 'arrow-scale': 0.8 } },
+      { selector: 'edge[tipo != "adjudicou_a"]', style: { 'target-arrow-shape': 'none' } },
+      { selector: 'edge[?atual]', style: { opacity: 1 } },
+      { selector: 'edge[!atual]', style: { opacity: 0.35 } },
+      { selector: 'edge[natureza = "inferida"]', style: { 'line-style': 'dashed', 'line-color': css('--aresta-inf'), 'target-arrow-color': css('--aresta-inf') } },
+      { selector: ':selected', style: { 'border-color': css('--acento'), 'line-color': css('--acento'), 'target-arrow-color': css('--acento') } },
+    ],
+  });
+  cy.on('tap', 'node', e => { const d = e.target.data(); if (d.listavel && d.papel !== 'centro') location.href = `/entidade/${d.id}`; });
+  cy.on('tap', 'edge', e => {
+    const a = e.target.data(), info = document.getElementById('info-aresta'); info.className = '';
+    const det = a.detalhe || {};
+    const partes = [`${cy.getElementById(a.source).data('nome')} → ${a.rotulo} → ${cy.getElementById(a.target).data('nome')}`,
+      `Natureza: ${a.natureza}${a.confianca != null ? ` (confiança ${Math.round(a.confianca * 100)}%)` : ''}`,
+      a.agregado ? 'Ligação agregada a pessoas singulares (sem identificação).' :
+        `Período: ${dt(a.valido_de)} – ${dt(a.valido_ate)} (${a.atual ? 'atual' : 'passada'})`,
+      det.n_contratos != null ? `${nf.format(det.n_contratos)} contratos, ${eur(det.total)}` : '',
+      det.n_procedimentos != null ? `${det.n_procedimentos} procedimentos em comum` : '',
+      det.metodo ? `Método: ${det.metodo}` : '',
+      a.fonte ? `Fonte: Portal BASE (${a.fonte})` : '',
+      a.versoes_anteriores ? `${a.versoes_anteriores} versão(ões) anterior(es) registada(s)` : ''];
+    info.textContent = partes.filter(Boolean).join(' · ');
+  });
+  document.getElementById('rede-nota').textContent = g.omitidas ? `${g.omitidas} ligações menos relevantes omitidas (mostradas as ${g.arestas.length} principais).` : '';
+}
+
+(async () => {
+  const r = await fetch(`/api/entidades/${ID}`);
+  const cab = document.getElementById('cabecalho');
+  if (!r.ok) { cab.textContent = (await r.json()).detail || 'Entidade não disponível.'; return; }
+  PERFIL = await r.json();
+  const e = PERFIL.entidade;
+  document.title = e.nome + ' — perfil';
+  cab.innerHTML = '';
+  cab.append(el('h1', e.nome), el('div', (e.nif ? `NIF ${e.nif}` : 'sem NIF na fonte · classificada como empresa pelo nome') +
+    ` · presente nos dados de ${dt(PERFIL.periodo.primeiro_visto)} a ${dt(PERFIL.periodo.ultimo_visto)}`, 'mut'));
+  if (e.nome_de_pessoa) cab.append(el('p', 'Empresa com nome de pessoa: os sinais referem-se à empresa (NIF de pessoa coletiva), não à pessoa.', 'aviso'));
+  const tabs = document.getElementById('tabs');
+  const papeis = Object.keys(PERFIL.papeis);
+  for (const p of papeis) { const b = el('button', p === 'adjudicante' ? 'Como adjudicante' : 'Como fornecedor'); b.dataset.p = p; b.onclick = () => mostrarPapel(p); tabs.append(b); }
+  const ul = document.getElementById('nomes');
+  PERFIL.nomes.forEach(n => ul.append(el('li', `${n.nome} (${n.fonte})`)));
+  if (papeis.length) mostrarPapel(papeis.sort((a, b) => PERFIL.papeis[b].resumo.n_contratos - PERFIL.papeis[a].resumo.n_contratos)[0]);
+  ['g-de', 'g-ate', 'g-estado', 'g-inf'].forEach(id => document.getElementById(id).addEventListener('change', desenharRede));
+  desenharRede();
+})();
+</script>
+</body>
+</html>

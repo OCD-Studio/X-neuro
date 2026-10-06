@@ -106,7 +106,9 @@ async function carregar() {
       <td class="num">${eur.format(e.valor_medio)}</td><td class="num">${e.pct_ajuste_direto}%</td>
       <td class="num">${e.n_sinais} / ${Number(e.esperados).toFixed(1)}</td><td class="num"><strong class="nivel-${e.score >= 50 ? 'alto' : e.score >= 20 ? 'medio' : 'baixo'}">${e.score}</strong></td>`;
     tr.onclick = () => detalhe(tr, e.id);
-    tr.cells[0].textContent = e.nome;
+    const ln = document.createElement('a'); ln.href = `/entidade/${e.id}`; ln.textContent = e.nome;
+    ln.onclick = ev => ev.stopPropagation();
+    tr.cells[0].append(ln);
     const t = document.createElement('div'); t.className = 'tag'; t.textContent = id; tr.cells[0].append(t);
     corpo.append(tr);
   }

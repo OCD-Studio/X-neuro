@@ -16,6 +16,7 @@ from typing import Literal
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.staticfiles import StaticFiles
 
 from . import bd
 from .config import RAIZ
@@ -46,6 +47,9 @@ ORDENACOES = {
 }
 
 
+app.mount("/static", StaticFiles(directory=RAIZ / "static"), name="static")
+
+
 @app.get("/", include_in_schema=False)
 def pagina():
     return FileResponse(RAIZ / "static" / "index.html")
@@ -54,6 +58,11 @@ def pagina():
 @app.get("/metodologia", include_in_schema=False)
 def pagina_metodologia():
     return FileResponse(RAIZ / "static" / "metodologia.html")
+
+
+@app.get("/entidade/{entidade_id}", include_in_schema=False)
+def pagina_entidade(entidade_id: int):
+    return FileResponse(RAIZ / "static" / "entidade.html")
 
 
 @app.get("/qualidade", include_in_schema=False)
@@ -404,6 +413,159 @@ def contratos(
             par,
         ).fetchall()
     return {"resultados": linhas}
+
+
+PAPEIS = {"a": "adjudicante", "f": "fornecedor"}
+
+
+@app.get("/api/entidades/{entidade_id}")
+def perfil_entidade(entidade_id: int):
+    """Perfil: identificação, variantes de nome, e por papel (adjudicante/fornecedor) totais, evolução anual,
+    procedimentos e contrapartes principais. Só para entidades listáveis (minimização de dados pessoais)."""
+    with bd.ligar() as con:
+        ent = _verificar_listavel(con, entidade_id)
+        nomes = con.execute(
+            "SELECT nome, fonte, visto_em FROM entidade_nome WHERE entidade_id = %s ORDER BY nome", (entidade_id,)
+        ).fetchall()
+        datas = con.execute("SELECT primeiro_visto, ultimo_visto FROM entidade WHERE id = %s", (entidade_id,)).fetchone()
+        papeis = {}
+        for p, nome_papel in PAPEIS.items():
+            resumo = con.execute(
+                "SELECT n_contratos, total, n_ajuste_direto, score, n_indicadores, n_sinais, esperados, n_avaliaveis "
+                "FROM resumo_entidade WHERE papel = %s AND entidade_id = %s", (p, entidade_id)).fetchone()
+            if not resumo:
+                continue
+            anos = con.execute(
+                "SELECT ano, n_contratos, total, n_ajuste_direto FROM agregado_entidade_ano "
+                "WHERE papel = %s AND entidade_id = %s ORDER BY ano", (p, entidade_id)).fetchall()
+            filtro = ("k.adjudicante_id = %(e)s" if p == "a" else
+                      "k.id IN (SELECT contrato_id FROM contrato_adjudicatario WHERE entidade_id = %(e)s)")
+            procedimentos = con.execute(
+                f"SELECT k.procedimento, count(*) AS n, coalesce(sum(k.preco_contratual), 0) AS total "
+                f"FROM contrato k WHERE {filtro} GROUP BY 1 ORDER BY n DESC", {"e": entidade_id}).fetchall()
+            # contrapartes: relações correntes 'adjudicou_a'; pessoas singulares agregadas numa só linha
+            lado, outro = ("origem_id", "destino_id") if p == "a" else ("destino_id", "origem_id")
+            contrapartes = con.execute(
+                f"""
+                SELECT CASE WHEN e.tipo_pessoa IN ('coletiva', 'coletiva_sem_nif') THEN e.id END AS id,
+                       CASE WHEN e.tipo_pessoa IN ('coletiva', 'coletiva_sem_nif') THEN e.nome
+                            ELSE 'Pessoas singulares (não identificadas)' END AS nome,
+                       sum((r.detalhe->>'n_contratos')::int) AS n_contratos,
+                       sum((r.detalhe->>'total')::numeric) AS total,
+                       min(r.valido_de) AS desde, max(r.valido_ate) AS ate,
+                       bool_or(r.valido_ate >= current_date) AS atual,
+                       count(*) AS n_entidades
+                FROM relacao r JOIN entidade e ON e.id = r.{outro}
+                WHERE r.{lado} = %(e)s AND r.tipo = 'adjudicou_a' AND r.substituido_em IS NULL
+                GROUP BY 1, 2 ORDER BY total DESC NULLS LAST LIMIT 15
+                """, {"e": entidade_id}).fetchall()
+            papeis[nome_papel] = {"resumo": resumo, "anos": anos, "procedimentos": procedimentos,
+                                  "contrapartes": contrapartes}
+    return {"entidade": ent, "nomes": nomes, "periodo": datas, "papeis": papeis,
+            "procedimentos_rotulos": {k: v["rotulo"] for k, v in PROCEDIMENTOS.items()}}
+
+
+TIPOS_RELACAO = {
+    "adjudicou_a": "adjudicou a",
+    "concorreram_juntos": "concorreram juntos",
+    "possivelmente_mesma_entidade": "possivelmente a mesma entidade",
+}
+
+
+@app.get("/api/grafo")
+def grafo_entidade(
+    entidade_id: int,
+    de: date | None = None,
+    ate: date | None = None,
+    estado: Literal["todas", "atuais", "passadas"] = "todas",
+    inferidas: bool = True,
+    max_arestas: int = Query(40, le=200),
+):
+    """Rede de 1.º grau de uma entidade, com temporalidade (atual/passada) e natureza (documentada/inferida).
+    Vizinhos que parecem pessoas singulares são agregados num nó anónimo por tipo de relação."""
+    cond = ["r.substituido_em IS NULL"]
+    par: dict = {"e": entidade_id, "lim": max_arestas}
+    if de:  # sobreposição de períodos
+        cond.append("(r.valido_ate IS NULL OR r.valido_ate >= %(de)s)"); par["de"] = de
+    if ate:
+        cond.append("(r.valido_de IS NULL OR r.valido_de <= %(ate)s)"); par["ate"] = ate
+    if estado == "atuais":
+        cond.append("(r.valido_ate IS NULL OR r.valido_ate >= current_date)")
+    elif estado == "passadas":
+        cond.append("r.valido_ate < current_date")
+    if not inferidas:
+        cond.append("r.natureza = 'documentada'")
+    with bd.ligar() as con:
+        centro = _verificar_listavel(con, entidade_id)
+        linhas = con.execute(
+            f"""
+            WITH r AS (  -- dois ramos (saída/entrada) para usar os índices por origem e por destino
+                SELECT r.*, r.destino_id AS vizinho, (r.valido_ate IS NULL OR r.valido_ate >= current_date) AS atual
+                FROM relacao r WHERE r.origem_id = %(e)s AND {' AND '.join(cond)}
+                UNION ALL
+                SELECT r.*, r.origem_id AS vizinho, (r.valido_ate IS NULL OR r.valido_ate >= current_date) AS atual
+                FROM relacao r WHERE r.destino_id = %(e)s AND r.origem_id <> %(e)s AND {' AND '.join(cond)}
+            )
+            SELECT r.id, r.tipo, r.natureza, r.confianca, r.valido_de, r.valido_ate, r.atual, r.fonte, r.detalhe,
+                   r.origem_id = %(e)s AS saida, r.vizinho, v.nome, v.tipo_pessoa, v.nif,
+                   v.tipo_pessoa IN ('coletiva', 'coletiva_sem_nif') AS listavel,
+                   (SELECT count(*) FROM relacao x WHERE x.origem_id = r.origem_id AND x.destino_id = r.destino_id
+                      AND x.tipo = r.tipo AND x.substituido_em IS NOT NULL) AS versoes_anteriores,
+                   ra.score AS score_adj, rf.score AS score_forn
+            FROM r JOIN entidade v ON v.id = r.vizinho
+            LEFT JOIN resumo_entidade ra ON ra.papel = 'a' AND ra.entidade_id = r.vizinho
+            LEFT JOIN resumo_entidade rf ON rf.papel = 'f' AND rf.entidade_id = r.vizinho
+            ORDER BY r.atual DESC, (r.tipo = 'adjudicou_a') DESC,
+                     (r.detalhe->>'total')::numeric DESC NULLS LAST, (r.detalhe->>'n_procedimentos')::int DESC NULLS LAST
+            """, par).fetchall()
+    nos = {entidade_id: {"id": str(entidade_id), "nome": centro["nome"], "papel": "centro", "listavel": True}}
+    arestas, anonimos, omitidas = [], {}, 0
+    for l in linhas:
+        if l["listavel"]:
+            if len(arestas) >= max_arestas:
+                omitidas += 1
+                continue
+            vid = str(l["vizinho"])
+            papel = ("fornecedor" if (l["tipo"] == "adjudicou_a" and l["saida"]) or l["tipo"] != "adjudicou_a"
+                     else "adjudicante")
+            nos.setdefault(l["vizinho"], {"id": vid, "nome": l["nome"], "papel": papel, "listavel": True,
+                                          "score": l["score_forn"] if papel == "fornecedor" else l["score_adj"]})
+        else:  # pessoas singulares: um nó anónimo por tipo de relação, sem nomes
+            vid = f"anon-{l['tipo']}"
+            a = anonimos.setdefault(vid, {"id": vid, "nome": "", "papel": "anonimo", "listavel": False, "n": 0,
+                                          "contratos": 0, "total": 0.0})
+            a["n"] += 1
+            a["contratos"] += int((l["detalhe"] or {}).get("n_contratos", 0))
+            a["total"] += float((l["detalhe"] or {}).get("total", 0))
+            continue
+        origem, destino = (str(entidade_id), vid) if l["saida"] else (vid, str(entidade_id))
+        arestas.append({"id": str(l["id"]), "source": origem, "target": destino, "tipo": l["tipo"],
+                        "rotulo": TIPOS_RELACAO.get(l["tipo"], l["tipo"]), "natureza": l["natureza"],
+                        "confianca": l["confianca"], "valido_de": l["valido_de"], "valido_ate": l["valido_ate"],
+                        "atual": l["atual"], "fonte": l["fonte"], "detalhe": l["detalhe"],
+                        "versoes_anteriores": l["versoes_anteriores"]})
+    for vid, a in anonimos.items():
+        a["nome"] = f"{a['n']} pessoas singulares (não identificadas)"
+        nos[vid] = a
+        tipo = vid.removeprefix("anon-")
+        arestas.append({"id": vid, "source": str(entidade_id), "target": vid, "tipo": tipo,
+                        "rotulo": TIPOS_RELACAO.get(tipo, tipo), "natureza": "documentada", "confianca": None,
+                        "atual": None, "agregado": True,
+                        "detalhe": {"n_contratos": a["contratos"], "total": round(a["total"], 2)}})
+    return {"centro": str(entidade_id), "nos": list(nos.values()), "arestas": arestas, "omitidas": omitidas,
+            "tipos": TIPOS_RELACAO}
+
+
+@app.get("/api/relacoes/historico")
+def historico_relacao(origem_id: int, destino_id: int, tipo: str = "adjudicou_a"):
+    """Todas as versões conhecidas de uma relação (bitemporal: validade + quando foi registada/substituída)."""
+    with bd.ligar() as con:
+        _verificar_listavel(con, origem_id)
+        _verificar_listavel(con, destino_id)
+        return con.execute(
+            "SELECT tipo, natureza, confianca, valido_de, valido_ate, registado_em, substituido_em, fonte, detalhe "
+            "FROM relacao WHERE origem_id = %s AND destino_id = %s AND tipo = %s ORDER BY registado_em",
+            (origem_id, destino_id, tipo)).fetchall()
 
 
 @app.get("/api/distritos")
