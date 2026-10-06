@@ -16,7 +16,7 @@ Sistema que ingere os contratos públicos portugueses, calcula **indicadores de 
 | 1b — Calibração do score (antecipada a pedido) | ✅ taxas de referência + score 0–100 por entidade |
 | 2 — Ingestão completa, scheduler diário, backfill, qualidade | ✅ 2012–2026; sincronização diária; página `/qualidade` |
 | 3 — Todos os indicadores + lista completa | ✅ 12 indicadores testados; lista < 1 s; minimização de pessoas singulares |
-| 4 — Resolução de entidades + grafo temporal + perfis de entidade | ⏳ |
+| 4 — Resolução de entidades + grafo temporal + perfis de entidade | ✅ com dados de contratação; registo comercial à espera de decisão (ver abaixo) |
 | 5 — Perfis de pessoa + organigrama | ⏳ |
 | 6 — Alertas + polish | ⏳ |
 
@@ -188,6 +188,33 @@ RCBE restrito desde o acórdão TJUE de 2022) → maior risco para pessoas/grafo
 - **Minimização de dados pessoais:** 89 mil fornecedores que parecem pessoas singulares (sem NIF na fonte e sem forma
   jurídica no nome, ou NIF de herança/empresário individual) não são listados nem perfilados (sql/010).
 - Anomalias da fonte registadas sem correção: p.ex. anúncio de 2020 com preço base de 34 000 000 000 000 000 €.
+
+## Resultado da Fase 4 (2026-10-06)
+
+**Grafo temporal bitemporal** (`contratacao/grafo.py`, tabela `relacao`), reconstruído na sincronização quando os dados mudam
+(~1 min, ~140 MB):
+
+| Relação | Natureza | Como | Nº (correntes) |
+|---|---|---|---|
+| `adjudicou_a` | documentada | contratos; validade do 1.º contrato ao fim (real ou estimado) da execução do último | 614 228 (99 395 atuais) |
+| `concorreram_juntos` | documentada | ≥ 5 procedimentos em comum como concorrentes (lotes contam 1 vez); validade até 1 ano após a última | 118 575 |
+| `possivelmente_mesma_entidade` | inferida (0,6 / 0,8) | empresa sem NIF com nome normalizado igual ao de UMA entidade com NIF (≥ 2 palavras, ≥ 8 caracteres) | 1 178 |
+
+- **Bitemporal:** `valido_de/valido_ate` (mundo real) + `registado_em/substituido_em` (conhecimento). Reconstruir sem
+  alterações não cria versões; uma alteração marca a versão anterior como substituída (nada é apagado).
+  `GET /api/relacoes/historico` devolve todas as versões de uma relação.
+- **Resolução de entidades:** por NIF (variantes de nome guardadas e mostradas no perfil); empresas sem NIF ligadas por
+  relação inferida com confiança, nunca fundidas; pessoas singulares nunca ligadas.
+
+**Perfil de entidade** (`/entidade/{id}`; API `GET /api/entidades/{id}` e `GET /api/grafo`): totais, score explicado por
+indicador, evolução anual (gráfico + tabela), principais contrapartes (atual/passada), distribuição por procedimento,
+contratos com sinais e ligação ao BASE, grafo de 1.º grau filtrável por período, atual/passada e documentada/inferida
+(clicar numa entidade abre o seu perfil). Vizinhos que parecem pessoas singulares aparecem agregados num nó anónimo.
+
+**Registo comercial — prova de conceito:** não existe fonte aberta em massa (dados.gov.pt só tem estatísticas
+agregadas do INE/DGPJ). Alternativas, todas fora da lista de domínios autorizados e a decidir: atos societários em
+publicacoes.mj.pt (consulta por NIPC), registo de interesses dos deputados (dados abertos do Parlamento), declarações
+na Entidade para a Transparência, nomeações no Diário da República, ou fornecedor comercial (API paga).
 
 ## Privacidade e RGPD
 
