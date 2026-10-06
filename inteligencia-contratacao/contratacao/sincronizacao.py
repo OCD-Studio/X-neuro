@@ -24,7 +24,7 @@ from typing import Any, Callable
 
 import psycopg
 
-from . import pontuacao
+from . import grafo, pontuacao
 from .config import FONTE_CONTRATOS
 from .fontes import base_anuncios, base_impic
 from .fontes.base_impic import Recurso
@@ -172,13 +172,14 @@ def executar(
             resultados[fonte.nome] = res_f
 
         pont = pontuacao.recalcular(con) if (pontuar and alterou) else None
+        graf = grafo.reconstruir(con) if (pontuar and alterou) else None
         falhas = [f"{f}:{a}" if len(fontes) > 1 else a
                   for f, rs in resultados.items() for a, r in rs.items() if "erro" in r]
         n_total = sum(len(rs) for rs in resultados.values())
         estado = "concluido" if not falhas else ("parcial" if len(falhas) < n_total else "falhou")
         principal = planos[fontes[0].nome]
         resumo = {"resultados": resultados if len(fontes) > 1 else resultados[fontes[0].nome],
-                  "pontuacao_recalculada": pont is not None, "falhas": falhas,
+                  "pontuacao_recalculada": pont is not None, "grafo": graf, "falhas": falhas,
                   "adiados": principal.adiados if len(fontes) == 1 else {n: p.adiados for n, p in planos.items()},
                   "deixaram_de_ser_publicados": principal.deixaram_de_ser_publicados}
         con.execute("UPDATE meta.sincronizacao SET estado=%s, terminado_em=clock_timestamp(), resumo=%s WHERE id=%s",

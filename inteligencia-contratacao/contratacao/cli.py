@@ -4,6 +4,7 @@
     python -m contratacao.cli sincronizar [--max-backfill 3]   # rotina diária (deltas + backfill)
     python -m contratacao.cli ingerir --ano 2025 [--ficheiro caminho.zip]
     python -m contratacao.cli pontuar
+    python -m contratacao.cli grafo                           # grafo temporal de relações
     python -m contratacao.cli verificar                       # requisitos do servidor
 """
 
@@ -14,7 +15,7 @@ import json
 import logging
 from pathlib import Path
 
-from . import bd, pontuacao, sincronizacao
+from . import bd, grafo, pontuacao, sincronizacao
 from .config import FONTE_CONTRATOS
 from .fontes import base_impic
 
@@ -31,6 +32,7 @@ def main(argv: list[str] | None = None) -> None:
     pi.add_argument("--ficheiro", type=Path)
     pi.add_argument("--forcar", action="store_true", help="recarregar mesmo que o ficheiro já tenha sido ingerido")
     sub.add_parser("pontuar")
+    sub.add_parser("grafo", help="reconstrói o grafo temporal de relações")
     sub.add_parser("verificar", help="verifica os requisitos do servidor (PostgreSQL, permissões, rede, disco)")
     a = p.parse_args(argv)
 
@@ -65,6 +67,9 @@ def main(argv: list[str] | None = None) -> None:
     elif a.cmd == "verificar":
         from .verificacao import verificar
         raise SystemExit(0 if verificar() else 1)
+    elif a.cmd == "grafo":
+        with bd.ligar() as con:
+            print(json.dumps(grafo.reconstruir(con), indent=2))
     elif a.cmd == "pontuar":
         with bd.ligar() as con:
             print(json.dumps(pontuacao.recalcular(con), indent=2))
