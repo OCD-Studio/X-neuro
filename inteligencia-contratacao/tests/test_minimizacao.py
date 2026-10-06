@@ -54,7 +54,8 @@ def test_api_nao_lista_nem_perfila_pessoas_singulares(con):
                 "cpv": ["45000000-7 - x"], "localExecucao": ["Portugal, Porto, Porto"], "Ano": 2025,
                 "concorrentes": ["1-X"]}
     carregar(con, iter([reg("1", "- - Maria Odete Machado"), reg("2", "500697370 - Empresa Y, Lda"),
-                        reg("3", "- - Construções Silva, S.A.")]), ano=2025, url=None, sha256="m")
+                        reg("3", "- - Construções Silva, S.A."), reg("4", "506930084 - M. Odete Machado")]),
+             ano=2025, url=None, sha256="m")
     pontuacao.recalcular(con)
     pessoa = con.execute("SELECT id FROM entidade WHERE nome = 'Maria Odete Machado'").fetchone()["id"]
 
@@ -65,8 +66,10 @@ def test_api_nao_lista_nem_perfila_pessoas_singulares(con):
         for q in ("", "?distrito=Porto", "?de=2025-01-01&ate=2025-12-31", "?q=Maria", "?formato=csv"):
             r = cli.get("/api/entidades" + q)
             assert "Maria Odete" not in r.text, q
-        nomes = {x["nome"] for x in cli.get("/api/entidades").json()["resultados"]}
-        assert nomes == {"Empresa Y, Lda", "Construções Silva, S.A."}
+        lista = {x["nome"]: x for x in cli.get("/api/entidades").json()["resultados"]}
+        assert set(lista) == {"Empresa Y, Lda", "Construções Silva, S.A.", "M. Odete Machado"}
+        assert lista["M. Odete Machado"]["nome_de_pessoa"] is True     # NIF coletivo, nome de pessoa: listada com aviso
+        assert lista["Empresa Y, Lda"]["nome_de_pessoa"] is False
         assert cli.get(f"/api/entidades/{pessoa}/risco").status_code == 404
         assert cli.get(f"/api/contratos?entidade_id={pessoa}").status_code == 404
         assert cli.get("/api/meta").json()["fornecedores_nao_listados"] == 1

@@ -159,7 +159,7 @@ _MSG_PROTEGIDO = ("Não disponível: a entidade parece ser uma pessoa singular (
 
 
 def _verificar_listavel(con, entidade_id: int) -> dict:
-    ent = con.execute("SELECT id, nif, identificado_por, nome, tipo_pessoa FROM entidade WHERE id = %s",
+    ent = con.execute("SELECT id, nif, identificado_por, nome, tipo_pessoa, nome_de_pessoa FROM entidade WHERE id = %s",
                       (entidade_id,)).fetchone()
     if not ent:
         raise HTTPException(404, "entidade não encontrada")
@@ -284,7 +284,7 @@ def entidades(
         sql = f"""
         WITH f AS (SELECT entidade_id AS eid, * FROM resumo_entidade WHERE papel = %(papel)s),
              ag AS (SELECT eid, n_contratos, total, n_ajuste_direto AS n_ad FROM f)
-        SELECT e.id, e.nif, e.identificado_por, e.tipo_pessoa, e.nome, ag.n_contratos, ag.total,
+        SELECT e.id, e.nif, e.identificado_por, e.tipo_pessoa, e.nome_de_pessoa, e.nome, ag.n_contratos, ag.total,
                round(ag.total / nullif(ag.n_contratos, 0), 2) AS valor_medio,
                round(100.0 * ag.n_ad / nullif(ag.n_contratos, 0), 1) AS pct_ajuste_direto,
                f.score, f.n_indicadores, f.n_sinais, f.esperados, f.n_avaliaveis, f.pontos
@@ -296,7 +296,7 @@ def entidades(
     else:
         sql = f"""
         WITH ag AS ({ag}), ind AS ({ind}), {sql_score()}
-        SELECT e.id, e.nif, e.identificado_por, e.tipo_pessoa, e.nome, ag.n_contratos, ag.total,
+        SELECT e.id, e.nif, e.identificado_por, e.tipo_pessoa, e.nome_de_pessoa, e.nome, ag.n_contratos, ag.total,
                round(ag.total / nullif(ag.n_contratos, 0), 2) AS valor_medio,
                round(100.0 * ag.n_ad / nullif(ag.n_contratos, 0), 1) AS pct_ajuste_direto,
                coalesce(f.score, 0) AS score, coalesce(f.n_indicadores, 0) AS n_indicadores,

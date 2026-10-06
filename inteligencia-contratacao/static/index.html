@@ -100,7 +100,8 @@ async function carregar() {
   corpo.innerHTML = '';
   for (const e of d.resultados || []) {
     const tr = document.createElement('tr');
-    const id = e.identificado_por === 'nif' ? 'NIF ' + e.nif : 'sem NIF na fonte · classificada como empresa pelo nome';
+    let id = e.identificado_por === 'nif' ? 'NIF ' + e.nif : 'sem NIF na fonte · classificada como empresa pelo nome';
+    if (e.nome_de_pessoa) id += ' · empresa com nome de pessoa: os sinais referem-se à empresa, não à pessoa';
     tr.innerHTML = `<td class="nome"></td><td class="num">${e.n_contratos}</td><td class="num">${eur.format(e.total)}</td>
       <td class="num">${eur.format(e.valor_medio)}</td><td class="num">${e.pct_ajuste_direto}%</td>
       <td class="num">${e.n_sinais} / ${Number(e.esperados).toFixed(1)}</td><td class="num"><strong class="nivel-${e.score >= 50 ? 'alto' : e.score >= 20 ? 'medio' : 'baixo'}">${e.score}</strong></td>`;
