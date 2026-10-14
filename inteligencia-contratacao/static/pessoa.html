@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="pt-PT">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cargos públicos registados</title>
+<link rel="stylesheet" href="/static/comum.css">
+</head>
+<body>
+<p><a href="/">← Lista</a> · <a href="/organigrama">Organigrama</a> · <a href="/metodologia">Metodologia e limites</a></p>
+<div id="cabecalho">a carregar…</div>
+<p class="aviso">Esta página mostra <strong>apenas cargos públicos registados</strong> na Entidade para a Transparência (factos de registo
+público, com fonte e data). Não contém dados da vida privada, não é uma avaliação da pessoa e não implica qualquer irregularidade.
+A ligação de uma entidade da Entidade para a Transparência à entidade correspondente no Portal BASE é <strong>inferida</strong>
+(com grau de confiança) e está sempre assinalada como tal. Pedidos de correção ou remoção: ver <a href="/metodologia#rgpd">Metodologia</a>.</p>
+
+<h2>Linha temporal — passado e presente</h2>
+<div class="legenda"><span><i style="background:var(--atual)"></i>em funções / atual</span>
+  <span><i style="background:var(--passado)"></i>passado</span><span><s style="border-top:2px dashed var(--acento)"></s>hoje</span></div>
+<div id="linha-tempo"></div>
+
+<h2>Cargos</h2>
+<div class="tabela" id="cargos"></div>
+<p class="mut" id="fonte"></p>
+
+<h2>Organigrama</h2>
+<div class="filtros-rede">
+  <label>De <input type="date" id="g-de"></label>
+  <label>Até <input type="date" id="g-ate"></label>
+  <label>Cargos <select id="g-estado"><option value="todas">Atuais e passados</option><option value="atuais">Só atuais</option><option value="passadas">Só passados</option></select></label>
+</div>
+<div class="legenda">
+  <span><i style="background:var(--no-pessoa)"></i>pessoa</span>
+  <span><i style="background:var(--no-et);border-radius:3px"></i>entidade (como a Entidade para a Transparência a nomeia)</span>
+  <span><i style="background:var(--no-base);border-radius:0;transform:rotate(45deg)"></i>entidade no Portal BASE</span>
+  <span><s></s>cargo — documentado · atual</span>
+  <span><s style="opacity:.35"></s>documentado · passado</span>
+  <span><s style="border-top:2px dashed var(--aresta-inf)"></s>correspondência inferida (com confiança)</span>
+</div>
+<div id="organigrama" role="img" aria-label="Organigrama de cargos públicos"></div>
+<p class="mut" id="org-nota"></p>
+<div id="org-info" class="mut">Clique numa entidade ou pessoa para expandir as suas ligações; clique numa ligação para ver fonte e período.</div>
+
+<script src="/static/vendor/cytoscape.min.js"></script>
+<script src="/static/organigrama.js"></script>
+<script>
+const ID = location.pathname.split('/').filter(Boolean).pop();
+const dt = s => s ? new Date(s + (s.length === 10 ? 'T00:00:00' : '')).toLocaleDateString('pt-PT') : '—';
+const el = (tag, txt, cls) => { const e = document.createElement(tag); if (txt != null) e.textContent = txt; if (cls) e.className = cls; return e; };
+const NS = 'http://www.w3.org/2000/svg';
+const svgEl = (tag, at) => { const e = document.createElementNS(NS, tag); for (const k in at) e.setAttribute(k, at[k]); return e; };
+
+function linhaTempo(cargos) {
+  const caixa = document.getElementById('linha-tempo');
+  const cs = cargos.filter(c => c.valido_de);
+  if (!cs.length) { caixa.append(el('p', 'Sem datas de início registadas na fonte.', 'mut')); return; }
+  const hoje = new Date();
+  const t = d => new Date(d + 'T00:00:00').getTime();
+  const min = Math.min(...cs.map(c => t(c.valido_de)));
+  const max = Math.max(hoje.getTime(), ...cs.map(c => c.valido_ate ? t(c.valido_ate) : 0));
+  const W = 1000, rot = 330, h = 22, H = cs.length * h + 28;
+  const x = v => rot + (v - min) / (max - min || 1) * (W - rot - 10);
+  const svg = svgEl('svg', { viewBox: `0 0 ${W} ${H}`, role: 'img', 'aria-label': 'Linha temporal dos cargos' });
+  svg.style.height = (H * Math.min(1, caixa.clientWidth / W || 1)) + 'px';
+  const a0 = new Date(min).getFullYear(), a1 = new Date(max).getFullYear();
+  const passo = Math.max(1, Math.ceil((a1 - a0) / 10));
+  for (let a = a0; a <= a1; a += passo) {
+    const xv = x(new Date(a, 0, 1).getTime()); if (xv < rot) continue;
+    svg.append(svgEl('line', { x1: xv, x2: xv, y1: 0, y2: H - 16, class: 'eixo' }));
+    const tx = svgEl('text', { x: xv, y: H - 4, 'text-anchor': 'middle' }); tx.textContent = a; svg.append(tx);
+  }
+  cs.forEach((c, i) => {
+    const y = i * h + 4, fim = c.valido_ate ? t(c.valido_ate) : hoje.getTime();
+    const r = svgEl('rect', { x: x(t(c.valido_de)), y, width: Math.max(3, x(fim) - x(t(c.valido_de))), height: h - 8, rx: 3,
+      class: c.atual ? 'b-atual' : 'b-passado' });
+    const tt = svgEl('title', {}); tt.textContent = `${c.cargo} · ${c.entidade_nome}: ${dt(c.valido_de)} – ${c.valido_ate ? dt(c.valido_ate) : 'em funções'}`;
+    r.append(tt); svg.append(r);
+    const tx = svgEl('text', { x: rot - 6, y: y + h - 11, 'text-anchor': 'end' });
+    const txt = `${c.cargo} — ${c.entidade_nome}`; tx.textContent = txt.length > 52 ? txt.slice(0, 51) + '…' : txt;
+    svg.append(tx);
+  });
+  const xh = x(hoje.getTime()); svg.append(svgEl('line', { x1: xh, x2: xh, y1: 0, y2: H - 16, class: 'hoje' }));
+  caixa.append(svg);
+}
+
+function tabelaCargos(cargos) {
+  const t = el('table'), cab = el('tr');
+  ['Cargo', 'Órgão', 'Entidade (fonte)', 'Período', 'Estado', 'Correspondência no Portal BASE', 'Declarações'].forEach(c => cab.append(el('th', c)));
+  t.append(cab);
+  for (const c of cargos) {
+    const tr = el('tr');
+    tr.append(el('td', c.cargo || '—'), el('td', c.orgao || '—'));
+    const ent = el('td'); const a = el('a', c.entidade_nome);
+    if (c.entidade_et_id) { a.href = `/organigrama?no=entidade_et:${c.entidade_et_id}`; ent.append(a); } else ent.textContent = c.entidade_nome;
+    ent.append(' ', el('span', 'documentado', 'etiqueta doc'));
+    tr.append(ent, el('td', `${dt(c.valido_de)} – ${c.valido_ate ? dt(c.valido_ate) : '…'}`),
+      el('td', c.valido_ate ? (c.atual ? 'termina ' + dt(c.valido_ate) : 'passado') : 'em funções (sem declaração de cessação)'));
+    const corr = el('td');
+    if (c.correspondencia_base) {
+      const b = c.correspondencia_base, l = el('a', b.nome); l.href = `/entidade/${b.entidade_id}`;
+      corr.append(l, ' ', el('span', `inferida · ${Math.round(b.confianca * 100)}%`, 'etiqueta inf'));
+      corr.title = 'Método: ' + b.metodo;
+    } else corr.append(el('span', 'sem correspondência inferida', 'mut'));
+    tr.append(corr, el('td', `${c.n_declaracoes} (última ${dt(c.ultima_declaracao)})`));
+    t.append(tr);
+  }
+  document.getElementById('cargos').append(t);
+}
+
+(async () => {
+  const r = await fetch(`/api/pessoas/${ID}`);
+  const cab = document.getElementById('cabecalho');
+  if (!r.ok) { cab.textContent = (await r.json()).detail || 'Pessoa não disponível.'; return; }
+  const P = await r.json();
+  document.title = P.pessoa.nome + ' — cargos públicos registados';
+  const atuais = P.cargos.filter(c => c.atual).length;
+  cab.innerHTML = '';
+  cab.append(el('h1', P.pessoa.nome),
+    el('div', `${P.cargos.length} cargos públicos registados · ${atuais} atuais · ${P.cargos.length - atuais} passados`, 'mut'));
+  linhaTempo(P.cargos);
+  tabelaCargos(P.cargos);
+  const f = document.getElementById('fonte');
+  f.append(`Fonte: ${P.fonte.nome}. Recolhido em ${dt(P.fonte.recolhido_em)}. ${P.fonte.nota} `);
+  const lk = el('a', 'Abrir consulta pública'); lk.href = P.fonte.url; lk.target = '_blank'; lk.rel = 'noopener'; f.append(lk);
+
+  const filtros = () => ({ de: document.getElementById('g-de').value, ate: document.getElementById('g-ate').value,
+    estado: document.getElementById('g-estado').value });
+  const org = Organigrama(document.getElementById('organigrama'),
+    { info: document.getElementById('org-info'), nota: document.getElementById('org-nota'), filtros });
+  ['g-de', 'g-ate', 'g-estado'].forEach(id => document.getElementById(id).addEventListener('change', () => org.recarregar('pessoa:' + ID)));
+  org.iniciar('pessoa:' + ID);
+})();
+</script>
+</body>
+</html>

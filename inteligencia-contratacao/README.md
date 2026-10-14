@@ -17,7 +17,7 @@ Sistema que ingere os contratos públicos portugueses, calcula **indicadores de 
 | 2 — Ingestão completa, scheduler diário, backfill, qualidade | ✅ 2012–2026; sincronização diária; página `/qualidade` |
 | 3 — Todos os indicadores + lista completa | ✅ 12 indicadores testados; lista < 1 s; minimização de pessoas singulares |
 | 4 — Resolução de entidades + grafo temporal + perfis de entidade | ✅ com dados de contratação; registo comercial à espera de decisão (ver abaixo) |
-| 5 — Perfis de pessoa + organigrama | ⏳ |
+| 5 — Perfis de pessoa + organigrama | ✅ cargos públicos (Entidade para a Transparência); Parlamento e interesses societários por decidir |
 | 6 — Alertas + polish | ⏳ |
 
 ## Arranque rápido
@@ -47,7 +47,7 @@ python -m contratacao.cli sincronizar --max-backfill 20       # tudo de uma vez 
 uvicorn contratacao.api:app --port 8000                       # http://localhost:8000
 ```
 
-Outros comandos: `migrar`, `ingerir --ano 2025 [--ficheiro x.zip]`, `pontuar`.
+Outros comandos: `migrar`, `ingerir --ano 2025 [--ficheiro x.zip]`, `pontuar`, `grafo`, `cargos [--max N] [--so-consolidar]`, `remover-pessoa ID`, `verificar`.
 Sem processo residente: cron do sistema, p.ex. `17 6 * * * cd /app && python -m contratacao.cli sincronizar`.
 
 Testes: `pytest` (os testes de integração correm se `TEST_DATABASE_URL` apontar para uma BD **descartável** —
@@ -216,11 +216,47 @@ agregadas do INE/DGPJ). Alternativas, todas fora da lista de domínios autorizad
 publicacoes.mj.pt (consulta por NIPC), registo de interesses dos deputados (dados abertos do Parlamento), declarações
 na Entidade para a Transparência, nomeações no Diário da República, ou fornecedor comercial (API paga).
 
+## Resultado da Fase 5 (2026-10-14)
+
+**Cargos públicos** (`contratacao/fontes/et_cargos.py`, migração `sql/014_pessoas_cargos.sql`):
+
+- Fonte: API da consulta pública da Entidade para a Transparência (`api.entidadetransparencia.pt/publicquery`):
+  lista de titulares (~12 400), lista de entidades (~4 500) e, por titular, a **lista** de declarações
+  (entidade, órgão, cargo, natureza, ano, início, fim, entrega). Lista branca de campos (`CAMPOS_PERMITIDOS`);
+  o endpoint com o conteúdo das declarações (`getdeclaration`: NIF, data de nascimento, morada, cônjuge, património)
+  **nunca é chamado**.
+- Recolha educada e retomável: 1 pedido/s, User-Agent identificado; titulares recolhidos há mais tempo primeiro.
+  Primeira recolha completa ~5 h; depois `ET_MAX_POR_DIA` (1500) por dia no agendador ou `cli cargos --max 500` no cron.
+- Consolidação: `pessoa` (só titulares com declarações; nome + id na fonte), `cargo` (pessoa × entidade × órgão × cargo,
+  `valido_de` = início mais antigo, `valido_ate` só com declaração de cessação/final — senão “em funções”).
+- Relações (fonte `et_cargos`, bitemporais, mesma função `grafo.aplicar_diferencas`):
+  - `cargo_em` pessoa → entidade_et — **documentada**;
+  - `corresponde_a` entidade_et → entidade do BASE — **inferida**: 0,95 nome normalizado igual a um nome registado no BASE;
+    0,9 órgão autárquico → pessoa coletiva (“Câmara/Assembleia Municipal de X” → “Município de X”,
+    “Junta/Assembleia de Freguesia de X” → “Freguesia de X”); só com candidato único e só pessoas coletivas com NIF.
+- Remoção (RGPD): `python -m contratacao.cli remover-pessoa ID` — oculta, apaga cargos e declarações guardados, retira
+  relações e exclui das recolhas seguintes.
+
+**Interface:** `/pessoa/{id}` (linha temporal passado/presente, cargos com fonte, correspondência inferida rotulada,
+organigrama), `/organigrama` (pesquisa de pessoas e entidades; árvore entidade → órgãos → pessoas → outras entidades;
+clicar expande; filtros de período e atual/passado; legenda documentada vs inferida), e secção “Cargos públicos
+registados” no perfil de entidade. API: `/api/pessoas`, `/api/pessoas/{id}`, `/api/entidades-et`, `/api/organigrama`,
+`/api/entidades/{id}/cargos`.
+
+**Por decidir:**
+- *Parlamento (registo biográfico, dados abertos):* tem legislatura e comissões, mas **sem datas de mandato** (só a
+  legislatura) e inclui data de nascimento (a descartar). A Entidade para a Transparência já cobre os deputados atuais;
+  o Parlamento acrescentaria sobretudo o histórico anterior a 2019. O site responde 403 de forma intermitente.
+- *Interesses em empresas* (declarações à ET): exigem abrir o conteúdo das declarações — só com mapeamento campo a campo
+  e exclusão de tudo o que é sensível.
+- *Atos societários (MJ):* pesquisa protegida por CAPTCHA — sem recolha automática; só registo manual com fonte.
+
 ## Privacidade e RGPD
 
 - Dados de contratação são públicos por lei; aplica-se minimização: não enriquecemos dados de pessoas singulares
   que sejam apenas fornecedores; a fonte já omite o NIF destas e nós não o tentamos recuperar.
 - Pessoas (Fase 5): só quem exerce/exerceu cargo público ou societário relevante; só factos de registo público,
-  cada um com fonte e data; nunca relações pessoais privadas.
+  cada um com fonte e data; nunca relações pessoais privadas; nunca dados sensíveis das declarações.
 - Relações **documentadas** e **inferidas** são sempre rotuladas e mostradas de forma distinta.
-- Pedidos de correção/remoção: `pessoa.removido_em` oculta a pessoa em todas as vistas (processo e contacto a definir).
+- Pedidos de correção/remoção: `cli remover-pessoa ID` (marca `pessoa.removido_em`, apaga cargos e declarações,
+  retira relações, deixa de recolher). Processo e contacto a definir.

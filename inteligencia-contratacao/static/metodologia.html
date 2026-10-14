@@ -61,6 +61,9 @@ O campo “critérios materiais” da fonte não é usado: é inconsistente com 
   <li><strong>Portal BASE / IMPIC</strong>, via dados.gov.pt — dataset “Contratos Públicos – Portal Base – IMPIC – Contratos de 2012 a 2026”,
   republicado semanalmente. Cada contrato liga ao seu registo em base.gov.pt.</li>
   <li>O dataset OCDS do Portal BASE em dados.gov.pt <strong>não é usado</strong>: está desatualizado desde 2022.</li>
+  <li><strong>Entidade para a Transparência</strong> — consulta pública de declarações (<a href="https://entidadetransparencia.pt/consultardeclaracaopublica">entidadetransparencia.pt</a>):
+  só a <em>lista</em> de declarações de cada titular (entidade, órgão, cargo, tipo de declaração e datas). O conteúdo das declarações
+  (rendimentos, património, NIF, data de nascimento, morada, familiares) <strong>nunca é recolhido</strong>. Recolha a 1 pedido por segundo, identificada.</li>
 </ul>
 
 <h2>Atualização</h2>
@@ -86,11 +89,20 @@ verificação, a última alteração de dados e a cobertura histórica; o detalh
   <li>Toda a relação tem período de validade (início/fim) e data em que foi registada, para distinguir <strong>atual</strong> de <strong>histórica</strong>.</li>
   <li><strong>Relação documentada</strong> = vem diretamente de uma fonte citada. <strong>Relação inferida</strong> = deduzida (ex.: morada comum),
   com grau de confiança. As duas são sempre rotuladas e mostradas de forma distinta.</li>
-  <li>Perfis de pessoas (fase futura) limitam-se a factos de registo público — cargos públicos, cargos e participações societárias, declarações
-  à Entidade para a Transparência — cada um com fonte e data. Não se incluem relações pessoais privadas nem pessoas sem cargo público ou societário relevante.</li>
+  <li>Perfis de pessoas limitam-se a factos de registo público — hoje, <strong>cargos públicos declarados à Entidade para a Transparência</strong>
+  — cada um com fonte e data. Não se incluem relações pessoais privadas nem pessoas sem cargo público ou societário relevante.
+  Um titular só aparece se tiver pelo menos uma declaração publicada.</li>
+  <li><strong>Cargo exercido</strong> (pessoa → entidade, tal como a Entidade para a Transparência a nomeia): relação <strong>documentada</strong>.
+  Início = data de início mais antiga declarada; fim = data de fim da declaração de cessação/final. Sem declaração de cessação o cargo
+  é mostrado como “em funções”, o que pode estar desatualizado se a cessação ainda não tiver sido declarada.</li>
+  <li><strong>Correspondência</strong> entre essa entidade e a entidade do Portal BASE (p.ex. “Câmara Municipal de Chaves” → “Município de Chaves”):
+  relação <strong>inferida</strong>, com confiança 0,95 (nome igual a um nome registado no BASE) ou 0,9 (órgão autárquico → município/freguesia),
+  só quando há um único candidato. É uma pista para cruzar fontes, não um facto.</li>
+  <li><strong>O que não se faz:</strong> não se ligam pessoas entre si, não se infere parentesco, amizade ou outra relação privada, e um cargo
+  nunca é tratado como sinal de risco. Ter um cargo numa entidade adjudicante não diz nada sobre os seus contratos.</li>
 </ul>
 
-<h2>Dados pessoais (RGPD)</h2>
+<h2 id="rgpd">Dados pessoais (RGPD)</h2>
 <p><strong>Pessoas singulares não são listadas.</strong> A fonte não publica o NIF de pessoas singulares; um fornecedor
 só aparece na lista e tem perfil se tiver NIF de pessoa coletiva ou se o nome indicar claramente uma forma jurídica
 (Lda, S.A., GmbH, Associação, Instituto…). Os restantes (pessoas, empresários em nome individual, nomes ambíguos, heranças
@@ -100,7 +112,10 @@ para os indicadores das entidades públicas que os adjudicaram.</p>
 com a indicação de que os sinais se referem à empresa e não à pessoa.</p>
 <p>Os dados de contratação são públicos por lei, mas aplicamos minimização: mostramos apenas o necessário à finalidade de interesse público,
 não enriquecemos dados de pessoas singulares que sejam apenas fornecedores, e qualquer pessoa pode pedir a correção ou remoção dos seus dados
-(contacto a definir). Pedidos aceites ocultam a pessoa em todas as vistas.</p>
+(contacto a definir). Pedidos aceites ocultam a pessoa em todas as vistas, apagam os cargos e declarações guardados,
+retiram as suas relações do grafo e excluem-na das recolhas seguintes.</p>
+<p>Titulares de cargos públicos: a finalidade é o interesse público no escrutínio do exercício de cargos públicos (fonte publicada por lei).
+Guardamos apenas nome, identificador do titular na fonte e a lista pública de declarações; nunca dados sensíveis.</p>
 <p class="mut">Referência metodológica: Fazekas, M. et al., Corruption Risk Index (Government Transparency Institute).</p>
 
 <script>

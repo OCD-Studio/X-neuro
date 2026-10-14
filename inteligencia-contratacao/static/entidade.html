@@ -78,6 +78,11 @@ não prova nem acusação. Relações <strong>documentadas</strong> vêm diretam
 <p class="mut" id="rede-nota"></p>
 <div id="info-aresta" class="mut">Clique numa ligação para ver a fonte e o período; clique numa entidade para abrir o seu perfil.</div>
 
+<h2>Cargos públicos registados</h2>
+<p class="mut">Entidades da Entidade para a Transparência que <strong>possivelmente correspondem</strong> a esta entidade
+(correspondência <strong>inferida</strong> pelo nome, com grau de confiança). Os cargos em si são factos documentados.</p>
+<div id="cargos-et" class="mut">a carregar…</div>
+
 <h2>Variantes de nome registadas</h2>
 <p class="mut">A entidade é identificada pelo NIF; estes são os nomes com que aparece na fonte (resolução de entidades auditável).</p>
 <ul id="nomes"></ul>
@@ -260,6 +265,15 @@ async function desenharRede() {
   if (papeis.length) mostrarPapel(papeis.sort((a, b) => PERFIL.papeis[b].resumo.n_contratos - PERFIL.papeis[a].resumo.n_contratos)[0]);
   ['g-de', 'g-ate', 'g-estado', 'g-inf'].forEach(id => document.getElementById(id).addEventListener('change', desenharRede));
   desenharRede();
+  const ce = document.getElementById('cargos-et');
+  const ets = await (await fetch(`/api/entidades/${ID}/cargos`)).json();
+  ce.innerHTML = '';
+  if (!ets.length) ce.textContent = 'Sem correspondência inferida com entidades da Entidade para a Transparência.';
+  for (const x of ets) {
+    const d = el('div'), a = el('a', x.nome); a.href = `/organigrama?no=entidade_et:${x.id}`;
+    d.append(a, ` — inferida (${Math.round(x.confianca * 100)}%, ${x.metodo}) · ${x.atuais} pessoa(s) com cargo atual, ${x.passados} com cargo passado · `);
+    const o = el('a', 'ver organigrama'); o.href = a.href; d.append(o); ce.append(d);
+  }
 })();
 </script>
 </body>

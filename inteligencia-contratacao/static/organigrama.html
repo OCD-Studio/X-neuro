@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="pt-PT">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Organigrama de cargos</title>
+<link rel="stylesheet" href="/static/comum.css">
+</head>
+<body>
+<p><a href="/">← Lista</a> · <a href="/metodologia">Metodologia e limites</a></p>
+<h1>Organigrama de cargos públicos</h1>
+<p class="aviso">Cargos declarados à Entidade para a Transparência (<strong>relações documentadas</strong>, com período e fonte).
+A correspondência com entidades do Portal BASE é <strong>inferida</strong> e mostrada a tracejado, com grau de confiança.
+Nenhuma relação pessoal é inferida. Um cargo não é indicador de risco nem de irregularidade.</p>
+
+<div class="procura">
+  <input id="q" type="search" placeholder="Procurar pessoa ou entidade (mín. 3 letras)" aria-label="Procurar">
+</div>
+<div class="tabela" style="display:flex;gap:24px;flex-wrap:wrap">
+  <div style="flex:1;min-width:260px"><h3>Pessoas</h3><ul class="resultados" id="r-pessoas"></ul></div>
+  <div style="flex:1;min-width:260px"><h3>Entidades</h3><ul class="resultados" id="r-entidades"></ul></div>
+</div>
+
+<div id="area" hidden>
+  <div class="filtros-rede">
+    <label>De <input type="date" id="g-de"></label>
+    <label>Até <input type="date" id="g-ate"></label>
+    <label>Cargos <select id="g-estado"><option value="todas">Atuais e passados</option><option value="atuais">Só atuais</option><option value="passadas">Só passados</option></select></label>
+  </div>
+  <div class="legenda">
+    <span><i style="background:var(--no-pessoa)"></i>pessoa</span>
+    <span><i style="background:var(--no-et);border-radius:3px"></i>entidade (Entidade para a Transparência)</span>
+    <span><i style="background:var(--no-base);border-radius:0;transform:rotate(45deg)"></i>entidade no Portal BASE</span>
+    <span><i style="background:var(--surface);border:1px solid var(--linha);border-radius:3px"></i>órgão</span>
+    <span><s></s>cargo documentado · atual</span>
+    <span><s style="opacity:.35"></s>documentado · passado</span>
+    <span><s style="border-top:2px dashed var(--aresta-inf)"></s>correspondência inferida</span>
+  </div>
+  <div id="organigrama" role="img" aria-label="Organigrama de cargos públicos"></div>
+  <p class="mut" id="org-nota"></p>
+  <div id="org-info" class="mut">Clique num nó para expandir; clique numa ligação para ver fonte, período e natureza.</div>
+</div>
+
+<script src="/static/vendor/cytoscape.min.js"></script>
+<script src="/static/organigrama.js"></script>
+<script>
+const el = (tag, txt, cls) => { const e = document.createElement(tag); if (txt != null) e.textContent = txt; if (cls) e.className = cls; return e; };
+const filtros = () => ({ de: document.getElementById('g-de').value, ate: document.getElementById('g-ate').value,
+  estado: document.getElementById('g-estado').value });
+const org = Organigrama(document.getElementById('organigrama'),
+  { info: document.getElementById('org-info'), nota: document.getElementById('org-nota'), filtros });
+let atual = new URLSearchParams(location.search).get('no');
+
+function abrir(no) {
+  atual = no;
+  history.replaceState(null, '', '/organigrama?no=' + encodeURIComponent(no));
+  document.getElementById('area').hidden = false;
+  org.iniciar(no);
+}
+['g-de', 'g-ate', 'g-estado'].forEach(id => document.getElementById(id).addEventListener('change', () => atual && org.recarregar(atual)));
+
+let temporizador;
+document.getElementById('q').addEventListener('input', e => {
+  clearTimeout(temporizador);
+  const q = e.target.value.trim();
+  if (q.length < 3) return;
+  temporizador = setTimeout(async () => {
+    const [ps, es] = await Promise.all([fetch('/api/pessoas?q=' + encodeURIComponent(q)), fetch('/api/entidades-et?q=' + encodeURIComponent(q))]);
+    const up = document.getElementById('r-pessoas'), ue = document.getElementById('r-entidades');
+    up.innerHTML = ''; ue.innerHTML = '';
+    for (const p of await ps.json()) {
+      const li = el('li'), a = el('a', p.nome); a.href = '#'; a.onclick = ev => { ev.preventDefault(); abrir('pessoa:' + p.id); };
+      const perfil = el('a', 'perfil'); perfil.href = '/pessoa/' + p.id;
+      li.append(a, ' · ', perfil, el('div', `${p.cargo_recente || ''} · ${p.n_cargos} cargo(s)${p.em_funcoes ? ' · em funções' : ''}`, 'mut'));
+      up.append(li);
+    }
+    for (const x of await es.json()) {
+      const li = el('li'), a = el('a', x.nome); a.href = '#'; a.onclick = ev => { ev.preventDefault(); abrir('entidade_et:' + x.id); };
+      li.append(a, el('div', `${x.n_pessoas} pessoa(s) com cargos registados`, 'mut'));
+      ue.append(li);
+    }
+    if (!up.children.length) up.append(el('li', 'Sem resultados.', 'mut'));
+    if (!ue.children.length) ue.append(el('li', 'Sem resultados.', 'mut'));
+  }, 250);
+});
+if (atual) abrir(atual);
+</script>
+</body>
+</html>

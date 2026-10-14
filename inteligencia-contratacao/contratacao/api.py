@@ -18,7 +18,7 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import bd
+from . import api_pessoas, bd
 from .config import RAIZ
 from .normalizacao import PROCEDIMENTOS
 from .calibracao import MIN_CONTRATOS_ENTIDADE, Z_CONFIANCA, score_entidade
@@ -47,6 +47,7 @@ ORDENACOES = {
 }
 
 
+app.include_router(api_pessoas.router)
 app.mount("/static", StaticFiles(directory=RAIZ / "static"), name="static")
 
 
@@ -63,6 +64,16 @@ def pagina_metodologia():
 @app.get("/entidade/{entidade_id}", include_in_schema=False)
 def pagina_entidade(entidade_id: int):
     return FileResponse(RAIZ / "static" / "entidade.html")
+
+
+@app.get("/pessoa/{pessoa_id}", include_in_schema=False)
+def pagina_pessoa(pessoa_id: int):
+    return FileResponse(RAIZ / "static" / "pessoa.html")
+
+
+@app.get("/organigrama", include_in_schema=False)
+def pagina_organigrama():
+    return FileResponse(RAIZ / "static" / "organigrama.html")
 
 
 @app.get("/qualidade", include_in_schema=False)
@@ -457,6 +468,7 @@ def perfil_entidade(entidade_id: int):
                        count(*) AS n_entidades
                 FROM relacao r JOIN entidade e ON e.id = r.{outro}
                 WHERE r.{lado} = %(e)s AND r.tipo = 'adjudicou_a' AND r.substituido_em IS NULL
+                  AND r.origem_tipo = 'entidade' AND r.destino_tipo = 'entidade'
                 GROUP BY 1, 2 ORDER BY total DESC NULLS LAST LIMIT 15
                 """, {"e": entidade_id}).fetchall()
             papeis[nome_papel] = {"resumo": resumo, "anos": anos, "procedimentos": procedimentos,
@@ -483,7 +495,8 @@ def grafo_entidade(
 ):
     """Rede de 1.º grau de uma entidade, com temporalidade (atual/passada) e natureza (documentada/inferida).
     Vizinhos que parecem pessoas singulares são agregados num nó anónimo por tipo de relação."""
-    cond = ["r.substituido_em IS NULL"]
+    # só arestas entre entidades do BASE (pessoas e entidades da ET têm ids noutro espaço)
+    cond = ["r.substituido_em IS NULL", "r.origem_tipo = 'entidade'", "r.destino_tipo = 'entidade'"]
     par: dict = {"e": entidade_id, "lim": max_arestas}
     if de:  # sobreposição de períodos
         cond.append("(r.valido_ate IS NULL OR r.valido_ate >= %(de)s)"); par["de"] = de
@@ -510,7 +523,8 @@ def grafo_entidade(
                    r.origem_id = %(e)s AS saida, r.vizinho, v.nome, v.tipo_pessoa, v.nif,
                    v.tipo_pessoa IN ('coletiva', 'coletiva_sem_nif') AS listavel,
                    (SELECT count(*) FROM relacao x WHERE x.origem_id = r.origem_id AND x.destino_id = r.destino_id
-                      AND x.tipo = r.tipo AND x.substituido_em IS NOT NULL) AS versoes_anteriores,
+                      AND x.tipo = r.tipo AND x.origem_tipo = 'entidade' AND x.destino_tipo = 'entidade'
+                      AND x.substituido_em IS NOT NULL) AS versoes_anteriores,
                    ra.score AS score_adj, rf.score AS score_forn
             FROM r JOIN entidade v ON v.id = r.vizinho
             LEFT JOIN resumo_entidade ra ON ra.papel = 'a' AND ra.entidade_id = r.vizinho
@@ -564,7 +578,8 @@ def historico_relacao(origem_id: int, destino_id: int, tipo: str = "adjudicou_a"
         _verificar_listavel(con, destino_id)
         return con.execute(
             "SELECT tipo, natureza, confianca, valido_de, valido_ate, registado_em, substituido_em, fonte, detalhe "
-            "FROM relacao WHERE origem_id = %s AND destino_id = %s AND tipo = %s ORDER BY registado_em",
+            "FROM relacao WHERE origem_tipo = 'entidade' AND destino_tipo = 'entidade' AND origem_id = %s "
+            "AND destino_id = %s AND tipo = %s ORDER BY registado_em",
             (origem_id, destino_id, tipo)).fetchall()
 
 
