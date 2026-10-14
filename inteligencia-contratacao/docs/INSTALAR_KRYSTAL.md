@@ -101,6 +101,16 @@ histórico** em falta. O histórico completo (15 anos) entra em ~8 dias, sem sob
 Para acelerar, pode correr à mão no Terminal `python -m contratacao.cli sincronizar --max-backfill 3`
 algumas vezes (cada ano demora 1–3 minutos; o recálculo do score ~10 minutos).
 
+**Segundo cron — cargos públicos (Entidade para a Transparência)**, uma vez por dia, p.ex. às `7:41`:
+
+```
+cd /home/UTILIZADOR/contratacao && /home/UTILIZADOR/virtualenv/contratacao/3.11/bin/python -m contratacao.cli cargos --max 500 >> /home/UTILIZADOR/contratacao_cargos.log 2>&1
+```
+
+Cada execução atualiza os 500 titulares recolhidos há mais tempo (~13 min a 1 pedido por segundo) e recalcula
+cargos e relações. A primeira recolha completa (~12 400 titulares) é mais rápida feita à mão no Terminal, em
+blocos: `python -m contratacao.cli cargos --max 3000` (retoma onde parou).
+
 ## 6. Confirmar
 
 - Página **Qualidade dos dados** (`/qualidade`): anos carregados a verde, histórico de execuções.

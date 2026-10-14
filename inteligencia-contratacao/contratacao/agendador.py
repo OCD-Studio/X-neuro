@@ -2,8 +2,10 @@
 
     python -m contratacao.agendador
 
-Hora configurável por SYNC_HORA / SYNC_MINUTO (fuso Europe/Lisbon). Alternativa
-sem processo residente: cron do sistema a chamar `python -m contratacao.cli sincronizar`.
+Hora configurável por SYNC_HORA / SYNC_MINUTO (fuso Europe/Lisbon). Depois da sincronização dos
+contratos, atualiza ET_MAX_POR_DIA titulares de cargos públicos (Entidade para a Transparência; por
+omissão 1500, ~40 min a 1 pedido/s; ciclo completo em ~8 dias). Alternativa sem processo residente:
+cron do sistema a chamar `python -m contratacao.cli sincronizar` e `python -m contratacao.cli cargos --max 1500`.
 """
 
 from __future__ import annotations
@@ -14,6 +16,7 @@ import os
 from apscheduler.schedulers.blocking import BlockingScheduler
 
 from . import bd, sincronizacao
+from .fontes import et_cargos
 
 log = logging.getLogger(__name__)
 
@@ -23,6 +26,11 @@ def tarefa() -> None:
     with bd.ligar() as con:
         r = sincronizacao.executar(con, max_backfill=max_bf)
     log.info("Sincronização terminada: %s", {k: r.get(k) for k in ("estado", "falhas", "adiados")})
+    try:  # uma falha na fonte de cargos não afeta os contratos
+        with bd.ligar() as con:
+            et_cargos.executar(con, max_titulares=int(os.environ.get("ET_MAX_POR_DIA", 1500)))
+    except Exception:
+        log.exception("Falhou a atualização de cargos públicos (Entidade para a Transparência)")
 
 
 def main() -> None:

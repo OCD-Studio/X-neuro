@@ -6,6 +6,8 @@
     python -m contratacao.cli pontuar
     python -m contratacao.cli grafo                           # grafo temporal de relações
     python -m contratacao.cli verificar                       # requisitos do servidor
+    python -m contratacao.cli cargos [--max 1500]             # cargos públicos (Entidade da Transparência)
+    python -m contratacao.cli remover-pessoa ID               # pedido de remoção (RGPD)
 """
 
 from __future__ import annotations
@@ -17,7 +19,7 @@ from pathlib import Path
 
 from . import bd, grafo, pontuacao, sincronizacao
 from .config import FONTE_CONTRATOS
-from .fontes import base_impic
+from .fontes import base_impic, et_cargos
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -33,6 +35,11 @@ def main(argv: list[str] | None = None) -> None:
     pi.add_argument("--forcar", action="store_true", help="recarregar mesmo que o ficheiro já tenha sido ingerido")
     sub.add_parser("pontuar")
     sub.add_parser("grafo", help="reconstrói o grafo temporal de relações")
+    pc = sub.add_parser("cargos", help="recolhe cargos públicos da Entidade da Transparência (1 pedido/s)")
+    pc.add_argument("--max", type=int, default=None, help="máximo de titulares nesta execução (mais antigos primeiro)")
+    pc.add_argument("--so-consolidar", action="store_true", help="não recolhe; só recalcula cargos e relações")
+    pr = sub.add_parser("remover-pessoa", help="oculta uma pessoa e apaga os seus cargos (RGPD)")
+    pr.add_argument("id", type=int)
     sub.add_parser("verificar", help="verifica os requisitos do servidor (PostgreSQL, permissões, rede, disco)")
     a = p.parse_args(argv)
 
@@ -70,6 +77,15 @@ def main(argv: list[str] | None = None) -> None:
     elif a.cmd == "grafo":
         with bd.ligar() as con:
             print(json.dumps(grafo.reconstruir(con), indent=2))
+    elif a.cmd == "cargos":
+        bd.migrar()
+        with bd.ligar() as con:
+            r = et_cargos.consolidar(con) if a.so_consolidar else et_cargos.executar(con, max_titulares=a.max)
+        print(json.dumps(r, indent=2, default=str))
+    elif a.cmd == "remover-pessoa":
+        with bd.ligar() as con:
+            et_cargos.remover_pessoa(con, a.id)
+        print(f"Pessoa {a.id} removida (oculta; cargos e declarações apagados).")
     elif a.cmd == "pontuar":
         with bd.ligar() as con:
             print(json.dumps(pontuacao.recalcular(con), indent=2))
