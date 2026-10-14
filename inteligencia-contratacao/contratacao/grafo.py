@@ -113,49 +113,60 @@ def _inferidas_mesmo_nome(con: psycopg.Connection) -> list[tuple]:
     return out
 
 
+SQL_REL_NOVA = (
+    "CREATE TEMP TABLE rel_nova (origem_tipo text NOT NULL DEFAULT 'entidade', origem_id bigint, "
+    "destino_tipo text NOT NULL DEFAULT 'entidade', destino_id bigint, tipo text, natureza text, "
+    "confianca numeric(3,2), valido_de date, valido_ate date, fonte_data date, detalhe jsonb) ON COMMIT DROP"
+)
+
+
+def aplicar_diferencas(cur, fonte: str) -> tuple[int, int]:
+    """Compara a tabela temporária rel_nova com as versões correntes de `fonte` e aplica as diferenças
+    de forma bitemporal: versões que mudaram/desapareceram ficam substituídas; novas/alteradas são inseridas.
+    Devolve (inseridas, substituidas). Não faz commit."""
+    cur.execute("CREATE INDEX ON rel_nova (origem_tipo, origem_id, destino_tipo, destino_id, tipo)")
+    substituidas = cur.execute(
+        """
+        UPDATE relacao r SET substituido_em = clock_timestamp()
+        WHERE r.substituido_em IS NULL AND r.fonte = %(f)s
+          AND NOT EXISTS (
+            SELECT 1 FROM rel_nova n
+            WHERE n.origem_tipo = r.origem_tipo AND n.origem_id = r.origem_id
+              AND n.destino_tipo = r.destino_tipo AND n.destino_id = r.destino_id AND n.tipo = r.tipo
+              AND n.natureza = r.natureza AND n.confianca IS NOT DISTINCT FROM r.confianca
+              AND n.valido_de IS NOT DISTINCT FROM r.valido_de AND n.valido_ate IS NOT DISTINCT FROM r.valido_ate
+              AND n.detalhe IS NOT DISTINCT FROM r.detalhe)
+        RETURNING 1
+        """, {"f": fonte}).rowcount
+    inseridas = cur.execute(
+        """
+        INSERT INTO relacao (origem_tipo, origem_id, destino_tipo, destino_id, tipo, natureza, confianca,
+                             valido_de, valido_ate, fonte, fonte_data, detalhe)
+        SELECT n.origem_tipo, n.origem_id, n.destino_tipo, n.destino_id, n.tipo, n.natureza, n.confianca,
+               n.valido_de, n.valido_ate, %(f)s, n.fonte_data, n.detalhe
+        FROM rel_nova n
+        WHERE NOT EXISTS (
+            SELECT 1 FROM relacao r
+            WHERE r.substituido_em IS NULL AND r.fonte = %(f)s AND r.origem_tipo = n.origem_tipo
+              AND r.origem_id = n.origem_id AND r.destino_tipo = n.destino_tipo AND r.destino_id = n.destino_id
+              AND r.tipo = n.tipo)
+        """, {"f": fonte}).rowcount
+    return inseridas, substituidas
+
+
 def reconstruir(con: psycopg.Connection) -> dict[str, int]:
     """Recalcula as relações e aplica as diferenças de forma bitemporal. Devolve contadores."""
     cur = con.cursor()
     gid = cur.execute("INSERT INTO meta.grafo DEFAULT VALUES RETURNING id").fetchone()["id"]
     con.commit()
-    cur.execute(
-        "CREATE TEMP TABLE rel_nova (origem_id bigint, destino_id bigint, tipo text, natureza text, "
-        "confianca numeric(3,2), valido_de date, valido_ate date, fonte_data date, detalhe jsonb) ON COMMIT DROP"
-    )
+    cur.execute(SQL_REL_NOVA)
     cur.execute(_SQL_DOCUMENTADAS)
     inferidas = _inferidas_mesmo_nome(con)  # antes do COPY: a ligação não aceita consultas durante um COPY
-    with cur.copy("COPY rel_nova FROM STDIN") as cp:
+    with cur.copy("COPY rel_nova (origem_id, destino_id, tipo, natureza, confianca, valido_de, valido_ate, "
+                  "fonte_data, detalhe) FROM STDIN") as cp:
         for linha in inferidas:
             cp.write_row(linha)
-    cur.execute("CREATE INDEX ON rel_nova (origem_id, destino_id, tipo)")
-
-    # 1) versões correntes que deixaram de existir ou mudaram -> substituídas
-    substituidas = cur.execute(
-        """
-        UPDATE relacao r SET substituido_em = clock_timestamp()
-        WHERE r.substituido_em IS NULL AND r.fonte = %(f)s AND r.origem_tipo = 'entidade' AND r.destino_tipo = 'entidade'
-          AND NOT EXISTS (
-            SELECT 1 FROM rel_nova n
-            WHERE n.origem_id = r.origem_id AND n.destino_id = r.destino_id AND n.tipo = r.tipo
-              AND n.natureza = r.natureza AND n.confianca IS NOT DISTINCT FROM r.confianca
-              AND n.valido_de IS NOT DISTINCT FROM r.valido_de AND n.valido_ate IS NOT DISTINCT FROM r.valido_ate
-              AND n.detalhe IS NOT DISTINCT FROM r.detalhe)
-        RETURNING 1
-        """, {"f": FONTE_CONTRATOS}).rowcount
-    # 2) relações novas ou alteradas -> nova versão corrente
-    inseridas = cur.execute(
-        """
-        INSERT INTO relacao (origem_tipo, origem_id, destino_tipo, destino_id, tipo, natureza, confianca,
-                             valido_de, valido_ate, fonte, fonte_data, detalhe)
-        SELECT 'entidade', n.origem_id, 'entidade', n.destino_id, n.tipo, n.natureza, n.confianca,
-               n.valido_de, n.valido_ate, %(f)s, n.fonte_data, n.detalhe
-        FROM rel_nova n
-        WHERE NOT EXISTS (
-            SELECT 1 FROM relacao r
-            WHERE r.substituido_em IS NULL AND r.fonte = %(f)s AND r.origem_tipo = 'entidade'
-              AND r.origem_id = n.origem_id AND r.destino_tipo = 'entidade' AND r.destino_id = n.destino_id
-              AND r.tipo = n.tipo)
-        """, {"f": FONTE_CONTRATOS}).rowcount
+    inseridas, substituidas = aplicar_diferencas(cur, FONTE_CONTRATOS)
     por_tipo = {l["tipo"]: l["n"] for l in cur.execute(
         "SELECT tipo, count(*) AS n FROM relacao WHERE substituido_em IS NULL GROUP BY 1")}
     resumo = {"inseridas": inseridas, "substituidas": substituidas, "correntes_por_tipo": por_tipo}
