@@ -61,7 +61,12 @@ nas definições do File Manager para o ver) com:
 ```
 DATABASE_URL=postgresql://ocd_contratacao:PALAVRA_PASSE@localhost/ocd_contratacao
 DIR_DADOS=/home/UTILIZADOR/contratacao_tmp
+APP_URL=https://SUBDOMINIO.ocd.pt
+ADMIN_TOKEN=UMA_FRASE_LONGA_E_ALEATORIA
 ```
+
+(`APP_URL` é usado nas ligações dos resumos de alertas; `ADMIN_TOKEN` permite marcar resumos como revistos na
+página `/alertas` — sem ele, essa revisão fica desativada.)
 
 e dar-lhe permissões `600` (botão direito → *Change Permissions*), porque contém a palavra-passe.
 A app e o cron leem este ficheiro (as variáveis do ecrã *Setup Python App* não chegam aos Cron Jobs). Depois, na mesma página: em *Configuration files* escrever `requirements.txt` → **Run Pip Install**.
@@ -93,8 +98,11 @@ cPanel → **Cron Jobs** → *Add New Cron Job*:
 - *Command* (uma só linha; substituir UTILIZADOR e a versão do Python pelos do passo 3):
 
 ```
-cd /home/UTILIZADOR/contratacao && /home/UTILIZADOR/virtualenv/contratacao/3.11/bin/python -m contratacao.cli sincronizar --max-backfill 2 >> /home/UTILIZADOR/contratacao_sync.log 2>&1
+cd /home/UTILIZADOR/contratacao && /home/UTILIZADOR/virtualenv/contratacao/3.11/bin/python -m contratacao.cli sincronizar --max-backfill 2 >> /home/UTILIZADOR/contratacao_sync.log 2>&1; /home/UTILIZADOR/virtualenv/contratacao/3.11/bin/python -m contratacao.cli alertas >> /home/UTILIZADOR/contratacao_sync.log 2>&1
 ```
+
+O segundo comando gera o **resumo diário de alertas como rascunho** (página `/alertas`). Nada é enviado: revê-se,
+marca-se como revisto (com o `ADMIN_TOKEN` do `.env`) e só então se copia o texto.
 
 Cada execução: verifica se a fonte mudou (≈ 1 s se nada mudou), atualiza o que mudou e carrega até **2 anos de
 histórico** em falta. O histórico completo (15 anos) entra em ~8 dias, sem sobrecarregar o alojamento partilhado.

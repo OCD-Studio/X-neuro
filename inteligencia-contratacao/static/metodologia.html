@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:,">
 <title>Metodologia e limites</title>
 <style>
   :root { --bg:#fafaf9; --fg:#1c1917; --mut:#78716c; --linha:#e7e5e4; --acento:#b45309; }
@@ -71,6 +72,13 @@ O campo “critérios materiais” da fonte não é usado: é inconsistente com 
 e carrega apenas o que mudou. Anos ainda não carregados entram progressivamente (do mais recente para o mais antigo).
 Contratos que desaparecem da fonte numa republicação ficam marcados, não são apagados. O topo da lista mostra a hora da última
 verificação, a última alteração de dados e a cobertura histórica; o detalhe está em <a href="/qualidade">Qualidade dos dados</a>.</p>
+
+<h2>Resumo diário de alertas</h2>
+<p>Depois de cada sincronização é gerado um resumo com os contratos <em>novos</em> com sinais de risco (registados desde o resumo
+anterior e publicados nos últimos 30 dias — o carregamento de anos antigos não conta como novo), as entidades que entraram ou
+saíram do nível alto e o estado das fontes. O resumo é sempre um <strong>rascunho</strong>: <strong>o sistema nunca envia nada</strong>.
+Uma pessoa revê-o em <a href="/alertas">Alertas</a>, marca-o como revisto e só então o copia para partilhar. Fornecedores que parecem
+pessoas singulares não são nomeados. Cargos públicos nunca entram nos alertas: um cargo não é um sinal de risco.</p>
 
 <h2>Limites conhecidos dos dados</h2>
 <ul>

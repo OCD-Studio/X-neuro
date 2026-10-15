@@ -8,6 +8,7 @@
     python -m contratacao.cli verificar                       # requisitos do servidor
     python -m contratacao.cli cargos [--max 1500]             # cargos públicos (Entidade da Transparência)
     python -m contratacao.cli remover-pessoa ID               # pedido de remoção (RGPD)
+    python -m contratacao.cli alertas                         # resumo diário em RASCUNHO (nunca envia)
 """
 
 from __future__ import annotations
@@ -17,7 +18,7 @@ import json
 import logging
 from pathlib import Path
 
-from . import bd, grafo, pontuacao, sincronizacao
+from . import alertas, bd, grafo, pontuacao, sincronizacao
 from .config import FONTE_CONTRATOS
 from .fontes import base_impic, et_cargos
 
@@ -38,6 +39,7 @@ def main(argv: list[str] | None = None) -> None:
     pc = sub.add_parser("cargos", help="recolhe cargos públicos da Entidade da Transparência (1 pedido/s)")
     pc.add_argument("--max", type=int, default=None, help="máximo de titulares nesta execução (mais antigos primeiro)")
     pc.add_argument("--so-consolidar", action="store_true", help="não recolhe; só recalcula cargos e relações")
+    sub.add_parser("alertas", help="gera o resumo de alertas desde o anterior, como rascunho (nada é enviado)")
     pr = sub.add_parser("remover-pessoa", help="oculta uma pessoa e apaga os seus cargos (RGPD)")
     pr.add_argument("id", type=int)
     sub.add_parser("verificar", help="verifica os requisitos do servidor (PostgreSQL, permissões, rede, disco)")
@@ -82,6 +84,10 @@ def main(argv: list[str] | None = None) -> None:
         with bd.ligar() as con:
             r = et_cargos.consolidar(con) if a.so_consolidar else et_cargos.executar(con, max_titulares=a.max)
         print(json.dumps(r, indent=2, default=str))
+    elif a.cmd == "alertas":
+        bd.migrar()
+        with bd.ligar() as con:
+            print(json.dumps(alertas.gerar(con), indent=2, default=str))
     elif a.cmd == "remover-pessoa":
         with bd.ligar() as con:
             et_cargos.remover_pessoa(con, a.id)

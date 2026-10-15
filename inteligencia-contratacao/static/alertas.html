@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="pt-PT">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:,">
+<title>Resumos de alertas</title>
+<link rel="stylesheet" href="/static/comum.css">
+<style>
+  .grelha { display:grid; grid-template-columns:260px 1fr; gap:20px; }
+  @media (max-width:760px) { .grelha { grid-template-columns:1fr; } }
+  ul.lista { list-style:none; padding:0; margin:0; } ul.lista li { padding:6px 8px; border-bottom:1px solid var(--linha); cursor:pointer; }
+  ul.lista li[aria-current="true"] { background:var(--surface); font-weight:600; }
+  .estado { font-size:11px; padding:1px 6px; border-radius:10px; border:1px solid var(--linha); }
+  .estado.rascunho { border-color:var(--acento); color:var(--acento); }
+  .estado.revisto { border-color:var(--atual); color:var(--atual); }
+  textarea { width:100%; min-height:220px; font:12px/1.45 ui-monospace, monospace; background:var(--surface); color:var(--fg);
+    border:1px solid var(--linha); border-radius:6px; padding:8px; }
+  .acoes { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin:8px 0; }
+  button { font:inherit; padding:5px 12px; border:1px solid var(--linha); background:var(--surface); color:var(--fg); border-radius:6px; cursor:pointer; }
+</style>
+</head>
+<body>
+<p><a href="/">← Lista</a> · <a href="/metodologia">Metodologia e limites</a></p>
+<h1>Resumos diários de alertas</h1>
+<p class="aviso">Cada resumo é gerado automaticamente como <strong>rascunho</strong> e <strong>nunca é enviado pelo sistema</strong>.
+Reveja, marque como revisto e só então copie ou descarregue o texto para partilhar pelos canais habituais.
+Os sinais são indicadores de risco, não prova nem acusação.</p>
+
+<div class="grelha">
+  <div><h3>Resumos</h3><ul class="lista" id="lista"><li class="mut">a carregar…</li></ul></div>
+  <div id="detalhe"><p class="mut">Escolha um resumo.</p></div>
+</div>
+
+<script>
+const el = (tag, txt, cls) => { const e = document.createElement(tag); if (txt != null) e.textContent = txt; if (cls) e.className = cls; return e; };
+const dt = s => s ? new Date(s).toLocaleString('pt-PT', { dateStyle: 'short', timeStyle: 'short' }) : '—';
+const eur = v => v == null ? '—' : new Intl.NumberFormat('pt-PT', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 }).format(v);
+const ROT = { rascunho: 'rascunho', revisto: 'revisto', arquivado: 'arquivado' };
+
+function link(txt, href) { const a = el('a', txt); a.href = href; return a; }
+
+async function abrir(id) {
+  document.querySelectorAll('#lista li').forEach(li => li.setAttribute('aria-current', li.dataset.id == id));
+  const r = await (await fetch('/api/alertas/' + id)).json();
+  const c = r.conteudo, d = document.getElementById('detalhe');
+  d.innerHTML = '';
+  d.append(el('h2', `Resumo de ${dt(r.ate)}`), el('p', `Janela ${dt(c.desde)} → ${dt(c.ate)} · estado: ${ROT[r.estado]}` +
+    (r.revisto_em ? ` em ${dt(r.revisto_em)}` : '') + (r.nota_revisao ? ` · nota: ${r.nota_revisao}` : ''), 'mut'));
+
+  d.append(el('h3', `Contratos novos com sinais de risco (${c.n_contratos})`));
+  if (!c.contratos.length) d.append(el('p', 'Nenhum contrato novo com sinais nesta janela.', 'mut'));
+  else {
+    const t = el('table'), cab = el('tr');
+    ['Adjudicante', 'Fornecedor(es)', 'Objeto', 'Valor', 'Sinais', 'Fonte'].forEach(h => cab.append(el('th', h))); t.append(cab);
+    for (const k of c.contratos) {
+      const tr = el('tr'), adj = el('td'); adj.append(link(k.adjudicante, '/entidade/' + k.adjudicante_id));
+      const fo = el('td');
+      (k.fornecedores || []).forEach((f, i) => { if (i) fo.append(', '); fo.append(f.id ? link(f.nome, '/entidade/' + f.id) : el('span', f.nome, 'mut')); });
+      const fonte = el('td'); if (k.url_fonte) { const a = link('BASE', k.url_fonte); a.target = '_blank'; a.rel = 'noopener'; fonte.append(a); }
+      tr.append(adj, fo, el('td', (k.objeto || '—').slice(0, 160)), el('td', eur(k.preco_contratual)),
+        el('td', `${k.sinais.join(', ')} (${k.pontos} pts)`), fonte);
+      t.append(tr);
+    }
+    const w = el('div', null, 'tabela'); w.append(t); d.append(w);
+    if (c.n_contratos > c.contratos.length) d.append(el('p', `… e mais ${c.n_contratos - c.contratos.length} na lista principal.`, 'mut'));
+  }
+
+  d.append(el('h3', 'Mudanças de nível de risco'));
+  const n = c.niveis;
+  if (n.linha_base) d.append(el('p', 'Primeiro resumo: linha de base registada; as mudanças aparecem a partir do próximo.', 'mut'));
+  else for (const [titulo, lista, total] of [['Entraram no nível alto', n.entraram_alto, n.n_entraram_alto], ['Saíram do nível alto', n.sairam_alto, n.n_sairam_alto]]) {
+    d.append(el('p', `${titulo}: ${total}`));
+    const ul = el('ul');
+    lista.forEach(e => { const li = el('li'); li.append(link(e.nome, '/entidade/' + e.id), ` (${e.papel}): ${e.score_anterior ?? 0} → ${e.score}`); ul.append(li); });
+    d.append(ul);
+  }
+  d.append(el('h3', 'Fontes'), el('p', `${c.fontes.sincronizacoes} sincronização(ões); com problemas: ${c.fontes.com_problemas.length}.`, 'mut'));
+
+  d.append(el('h3', 'Texto para partilhar (depois de revisto)'));
+  const ta = el('textarea'); ta.value = r.texto; ta.readOnly = true; d.append(ta);
+  const ac = el('div', null, 'acoes');
+  const copiar = el('button', 'Copiar texto'); copiar.onclick = async () => { await navigator.clipboard.writeText(r.texto); copiar.textContent = 'Copiado'; };
+  const desc = link('Descarregar .md', `/api/alertas/${id}/texto.md`);
+  if (r.estado === 'rascunho') { copiar.disabled = true; copiar.title = 'Marque como revisto primeiro'; }
+  ac.append(copiar, desc); d.append(ac);
+
+  d.append(el('h3', 'Revisão'));
+  const rv = el('div', null, 'acoes');
+  const tok = el('input'); tok.type = 'password'; tok.placeholder = 'token de revisão'; tok.setAttribute('aria-label', 'Token de revisão');
+  try { tok.value = sessionStorage.getItem('tok') || ''; } catch (e) {}
+  const nota = el('input'); nota.placeholder = 'nota (opcional)'; nota.setAttribute('aria-label', 'Nota de revisão');
+  const msg = el('span', null, 'mut');
+  for (const est of ['revisto', 'arquivado', 'rascunho']) {
+    const b = el('button', est === 'rascunho' ? 'Voltar a rascunho' : 'Marcar como ' + est);
+    b.onclick = async () => {
+      try { sessionStorage.setItem('tok', tok.value); } catch (e) {}
+      const res = await fetch(`/api/alertas/${id}/estado`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Token': tok.value },
+        body: JSON.stringify({ estado: est, nota: nota.value || null }) });
+      if (!res.ok) { msg.textContent = (await res.json()).detail; return; }
+      await carregarLista(); abrir(id);
+    };
+    rv.append(b);
+  }
+  rv.prepend(tok, nota); rv.append(msg); d.append(rv);
+}
+
+async function carregarLista() {
+  const rs = await (await fetch('/api/alertas')).json();
+  const ul = document.getElementById('lista'); ul.innerHTML = '';
+  if (!rs.length) ul.append(el('li', 'Ainda não há resumos (gerados após a sincronização diária).', 'mut'));
+  for (const r of rs) {
+    const li = el('li'); li.dataset.id = r.id; li.tabIndex = 0;
+    li.append(el('div', dt(r.ate)), el('span', ROT[r.estado], 'estado ' + r.estado),
+      el('span', ` ${r.n_contratos} contratos · ${r.linha_base ? 'linha de base' : r.n_entraram_alto + ' novos alto'}`, 'mut'));
+    li.onclick = () => abrir(r.id); li.onkeydown = e => { if (e.key === 'Enter') abrir(r.id); };
+    ul.append(li);
+  }
+  return rs;
+}
+carregarLista().then(rs => { const q = new URLSearchParams(location.search).get('id'); if (q) abrir(q); else if (rs.length) abrir(rs[0].id); });
+</script>
+</body>
+</html>

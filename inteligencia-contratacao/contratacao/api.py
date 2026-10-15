@@ -18,7 +18,7 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import api_pessoas, bd
+from . import api_alertas, api_pessoas, bd
 from .config import RAIZ
 from .normalizacao import PROCEDIMENTOS
 from .calibracao import MIN_CONTRATOS_ENTIDADE, Z_CONFIANCA, score_entidade
@@ -48,6 +48,7 @@ ORDENACOES = {
 
 
 app.include_router(api_pessoas.router)
+app.include_router(api_alertas.router)
 app.mount("/static", StaticFiles(directory=RAIZ / "static"), name="static")
 
 
@@ -69,6 +70,11 @@ def pagina_entidade(entidade_id: int):
 @app.get("/pessoa/{pessoa_id}", include_in_schema=False)
 def pagina_pessoa(pessoa_id: int):
     return FileResponse(RAIZ / "static" / "pessoa.html")
+
+
+@app.get("/alertas", include_in_schema=False)
+def pagina_alertas():
+    return FileResponse(RAIZ / "static" / "alertas.html")
 
 
 @app.get("/organigrama", include_in_schema=False)

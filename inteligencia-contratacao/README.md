@@ -18,7 +18,7 @@ Sistema que ingere os contratos públicos portugueses, calcula **indicadores de 
 | 3 — Todos os indicadores + lista completa | ✅ 12 indicadores testados; lista < 1 s; minimização de pessoas singulares |
 | 4 — Resolução de entidades + grafo temporal + perfis de entidade | ✅ com dados de contratação; registo comercial à espera de decisão (ver abaixo) |
 | 5 — Perfis de pessoa + organigrama | ✅ cargos públicos (Entidade para a Transparência); Parlamento e interesses societários por decidir |
-| 6 — Alertas + polish | ⏳ |
+| 6 — Alertas + polish | ✅ resumo diário em rascunho (`/alertas`), nunca enviado automaticamente |
 
 ## Arranque rápido
 
@@ -250,6 +250,22 @@ registados” no perfil de entidade. API: `/api/pessoas`, `/api/pessoas/{id}`, `
 - *Interesses em empresas* (declarações à ET): exigem abrir o conteúdo das declarações — só com mapeamento campo a campo
   e exclusão de tudo o que é sensível.
 - *Atos societários (MJ):* pesquisa protegida por CAPTCHA — sem recolha automática; só registo manual com fonte.
+
+## Resultado da Fase 6 (2026-10-15)
+
+**Resumo diário de alertas** (`contratacao/alertas.py`, `sql/016_alertas.sql`, página `/alertas`):
+
+- Gerado depois da sincronização (agendador, ou `cli alertas` no cron) e guardado em `alerta_resumo` com estado
+  **rascunho**. **Nada é enviado**: não há integração de email nem publicação. Revisão humana em `/alertas`
+  (estados rascunho → revisto/arquivado, protegidos por `ADMIN_TOKEN`); o texto Markdown só fica copiável depois de revisto
+  (o `.md` pode ser descarregado a qualquer momento e diz "RASCUNHO PARA REVISÃO HUMANA").
+- Conteúdo: (1) contratos novos com sinais — registados desde o resumo anterior **e** publicados nos últimos 30 dias,
+  ordenados por pontos; fornecedores singulares anonimizados; (2) entidades que entraram/saíram do nível alto face à
+  fotografia anterior (`meta.alerta_score`; o primeiro resumo é só linha de base); (3) sincronizações com problemas.
+- Cargos públicos não entram nos alertas (um cargo não é sinal de risco).
+- Variáveis: `APP_URL` (ligações no texto), `ADMIN_TOKEN` (revisão).
+
+**Polish:** ligações de navegação entre lista, alertas e organigrama; favicon vazio (sem 404 na consola).
 
 ## Privacidade e RGPD
 
